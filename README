@@ -1,4 +1,4 @@
-![Header](/Users/garycheng/Desktop/Autosense_banner.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/banner.png)
 
 # What's Autosense
 **Autosense** prepares the test environment and ensure that users have same test environment before build a test. Based on test cases, user can drive automated test by intuitive user interface. And it supported the customize test log reports the results of the test execution for each test case.
