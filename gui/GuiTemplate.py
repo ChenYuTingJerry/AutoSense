@@ -1,9 +1,9 @@
 from PySide import QtGui, QtCore
-from utility import FONT_FAMILY
-
+from main import constants
 import xml.etree.ElementTree as ET
 import directory as folder
 import time
+import sys
 import re
 
 
@@ -86,6 +86,7 @@ class Container(QtGui.QWidget):
     def setAlignment(self, alignment):
         self.mLayout.setAlignment(alignment)
 
+
 class HContainer(Container):
     def __init__(self):
         super(HContainer, self).__init__(witch='H')
@@ -96,7 +97,7 @@ class VContainer(Container):
         super(VContainer, self).__init__(witch='V')
 
 
-class IntroWindow(QtGui.QWidget):
+class IntroWindow(QtGui.QDialog):
     def __init__(self):
         super(IntroWindow, self).__init__()
         self.deskInfo = QtGui.QApplication.desktop()
@@ -230,20 +231,23 @@ class InfoListWidget(ListWidget):
         item = QtGui.QListWidgetItem()
         font = item.font()
         font.setPixelSize(14)
-        font.setFmaily(FONT_FAMILY)
+        font.setFmaily(constants.FONT_FAMILY)
         item.setFont(font)
         item.setText(text)
         return item
 
 
 class PushButton(QtGui.QPushButton):
+    pressIcon = None
+    normalIcon = None
+
     def __init__(self, text=None, font_size=None, font_weight=None, text_color=None, rect_color=None):
         super(PushButton, self).__init__()
         self.setStyleSheet('QPushButton{background-color: %s; color: %s;}' % (rect_color, text_color))
         self.pressed.connect(self.press)
         self.released.connect(self.release)
         font = self.font()
-        font.setFamily(FONT_FAMILY)
+        font.setFamily(constants.FONT_FAMILY)
         if font_size:
             font.setPixelSize(font_size)
 
@@ -263,14 +267,13 @@ class PushButton(QtGui.QPushButton):
         self.pressIcon = icon
 
     def press(self):
-        print 'press'
         if self.pressIcon:
             self.setIcon(self.pressIcon)
 
     def release(self):
-        print 'release'
         if self.normalIcon:
             self.setIcon(self.normalIcon)
+
 
 class IconButton(QtGui.QToolButton):
     normalIcon = None
@@ -318,7 +321,7 @@ class IconWithWordsButton(IconButton):
         self.setStyleSheet('QToolButton{background-color: transparent; color: %s}'
                            'QToolButton::menu-indicator { image: none; }' % text_color)
         font = self.font()
-        font.setFamily(FONT_FAMILY)
+        font.setFamily(constants.FONT_FAMILY)
         if font_size:
             font.setPixelSize(font_size)
 
@@ -335,7 +338,7 @@ class TitleButton(QtGui.QPushButton):
     def __init__(self, text=None, font_size=None, text_color=None, rect_color=None):
         super(TitleButton, self).__init__()
         font = self.font()
-        font.setFamily(FONT_FAMILY)
+        font.setFamily(constants.FONT_FAMILY)
 
         if font_size:
             font.setPixelSize(font_size)
@@ -472,7 +475,7 @@ class MyCheckBox(QtGui.QCheckBox):
     identity = None
     onStateChanged = QtCore.Signal(str, bool)
 
-    def __init__(self, text=None, font_weight=None, font_size=None, identity=None, color=None):
+    def __init__(self, text=None, font_weight=None, font_size=None, identity=None):
         super(MyCheckBox, self).__init__()
         self.stateChanged.connect(self.changedState)
         self.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
@@ -491,18 +494,23 @@ class MyCheckBox(QtGui.QCheckBox):
         if identity:
             self.identity = identity
 
-        if color:
-
         self.setFont(font)
 
     def changedState(self, state):
         self.onStateChanged.emit(self.identity, state)
 
-    def setUncheckedIcon(self, icon):
-        self.setIcon(icon)
+    def setUncheckedIcon(self, imageName):
+        self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:unchecked {image: url('
+                           '%s);}' % imageName)
 
-    def setColor(self, color):
-        self.setStyleSheet('QCheckBox{Checkcolor: %s;}' % color)
+    def setHoverIcon(self, imageName):
+        self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:unchecked:hover {image: url('
+                           '%s);}' % imageName)
+
+    def setCheckedIcon(self, imageName):
+        self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:checked {image: url('
+                           '%s);}' % imageName)
+
 
 class MyLabel(QtGui.QLabel):
     def __init__(self, text=None, font_weight=None, font_size=None, color=None):
@@ -528,7 +536,7 @@ class MyLabel(QtGui.QLabel):
 
 
 class MyLineEdit(QtGui.QLineEdit):
-    def __init__(self, text=None, font_weight=None, font_size=None):
+    def __init__(self, text=None, font_weight=None, font_size=None, color=None):
         super(MyLineEdit, self).__init__()
         self.setStyleSheet('color: #6C9EFF')
         self.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
@@ -543,10 +551,16 @@ class MyLineEdit(QtGui.QLineEdit):
         if font_size:
             font.setPixelSize(font_size)
 
+        if color:
+            self.setColor(color)
+
         self.setFont(font)
 
     def setId(self, identity):
         self.identity = identity
+
+    def setColor(self, color):
+        self.setStyleSheet('color: %s' % color)
 
 
 class SearchBox(QtGui.QLineEdit):
@@ -675,14 +689,30 @@ class BaseListView(QtGui.QListWidget):
         else:
             return self.count()
 
+    def firstSelectedRow(self):
+        row = sys.maxint
+        selectedItems = self.selectedItems()
+        for item in selectedItems:
+            if self.row(item) < row:
+                row = self.row(item)
+
+        if row == sys.maxint:
+            return -1
+        else:
+            return row
 
 class TestPlanListItem(HContainer):
+
     def __init__(self, text=None):
         super(TestPlanListItem, self).__init__()
-        self.label = MyCheckBox(text, font_size=12, color='#FFFFFF')
+
+        self.checkWidget = VContainer()
+        self.checkWidget.setFixedSize(30, 30)
+        self.label = MyLabel(text, font_size=12, color='#FFFFFF')
         self.label.setFixedHeight(30)
-        self.mLayout.addWidget(self.label)
-        self.setContentsMargins(36, 0, 0, 0)
+        self.addWidget(self.checkWidget)
+        self.addWidget(self.label)
+        self.setContentsMargins(0, 0, 0, 0)
 
     def text(self):
         return self.label.text()
@@ -694,6 +724,63 @@ class TestPlanListView(BaseListView):
         self.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
         self.addStyleSheet('TestPlanListView::item{border-bottom: 1px solid #181818; }'
                            'TestPlanListView{background-color: transparent;}')
+        if active_color:
+            self.setActiveColor(active_color)
+
+    def haveItem(self, text):
+        for num in range(self.count()):
+            widget = self.itemWidget(self.item(num))
+            if widget.text() == text:
+                return True
+
+        return False
+
+
+class PlayQueueListItem(HContainer):
+
+    def __init__(self, text=None):
+        super(PlayQueueListItem, self).__init__()
+        self.box = MyCheckBox()
+        self.box.setUncheckedIcon(constants.ICON_FOLDER+'/ic_add to q_normal.png')
+        self.box.setCheckedIcon(constants.ICON_FOLDER+'/ic_confirm add to quene.png')
+        self.box.setHoverIcon(constants.ICON_FOLDER+'/ic_add to q_press.png')
+        self.box.onStateChanged.connect(self.onStateChange)
+
+        self.checkWidget = VContainer()
+        self.checkWidget.addWidget(self.box)
+        self.checkWidget.setFixedSize(30, 30)
+        self.label = MyLabel(text, font_size=12, color='#4F4F4F')
+        self.label.setFixedHeight(30)
+        self.addWidget(self.checkWidget)
+        self.addWidget(self.label)
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def text(self):
+        return self.label.text()
+
+    def isChecked(self):
+        return self.box.isChecked()
+
+    def setCheckBoxVisible(self, status):
+        if status:
+            if not self.box.isChecked():
+                self.label.setColor('#4F4F4F')
+        else:
+            self.label.setColor('#FFFFFF')
+
+    def onStateChange(self, identify, status):
+        if status:
+            self.label.setColor('#FFFFFF')
+        else:
+            self.label.setColor('#4F4F4F')
+
+
+class PlayQueueListView(BaseListView):
+    def __init__(self, active_color=None):
+        super(PlayQueueListView, self).__init__()
+        self.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+        self.addStyleSheet('PlayQueueListView::item{border-bottom: 1px solid #181818; }'
+                           'PlayQueueListView{background-color: transparent;}')
         if active_color:
             self.setActiveColor(active_color)
 
@@ -755,7 +842,7 @@ class DescriptionEdit(QtGui.QPlainTextEdit):
         self.setStyleSheet('DescriptionEdit{border: 1px solid #404040; background-color: transparent; '
                            'color: #FFFFFF}')
         font = self.font()
-        font.setFamily(FONT_FAMILY)
+        font.setFamily(constants.FONT_FAMILY)
         font.setPixelSize(10)
         self.setFont(font)
 
