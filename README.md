@@ -1,4 +1,4 @@
-![Header](/Users/garycheng/AutoSense_2/doc/Autosense_banner.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/Autosense_banner.png)
 
 # What's Autosense
 **Autosense** prepares the test environment and ensure that users have same test environment before build a test. Based on test cases, user can drive automated test by intuitive user interface. And it supported the customize test log reports the results of the test execution for each test case.
@@ -8,17 +8,17 @@ The risk of software failure has never been greater.This combination creates inc
 
 ##How to use?
 ###Step 1. Connect your device to your computer
-![Header](/Users/garycheng/AutoSense_2/doc/ step1.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/%20step1.png)
 ###Step 2. Create a Testplan and add Action Script to Autosense
-![Header](/Users/garycheng/AutoSense_2/doc/step2.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/step2.png)
 ###Step 3. Customized your Autotest Playlist and run your testplan
-![Header](/Users/garycheng/AutoSense_2/doc/step3.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/step3.png)
 ###Step 4. Waiting for Autotest finished
-![Header](/Users/garycheng/AutoSense_2/doc/step4.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/step4.png)
 ###Step 5. Make sure all Semi-Auto mark is checked
-![Header](/Users/garycheng/AutoSense_2/doc/step5.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/step5.png)
 ###Step 6. Export your Autotest report
-![Header](/Users/garycheng/AutoSense_2/doc/step6.png)
+![Header](https://github.com/yra99ary/AutoSense_2/blob/master/doc/step6.png)
 
 ##Support Device key & Gesture
 ###Device Key:
