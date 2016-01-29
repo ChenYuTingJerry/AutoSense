@@ -144,11 +144,13 @@ class IntroWindow(QtGui.QDialog):
 
     def setLeaveBtnText(self, text):
         self.leaveBtn.setText(text)
+        self.leaveBtn.setFocus(QtCore.Qt.TabFocusReason)
         self.leaveBtn.setFixedSize(self.leaveBtn.sizeHint())
         self.leaveBtn.setVisible(True)
 
     def setOkBtnText(self, text):
         self.okBtn.setText(text)
+        self.okBtn.setFocus(QtCore.Qt.TabFocusReason)
         self.okBtn.setFixedSize(self.okBtn.sizeHint())
         self.okBtn.setVisible(True)
 
@@ -231,7 +233,7 @@ class InfoListWidget(ListWidget):
         item = QtGui.QListWidgetItem()
         font = item.font()
         font.setPixelSize(14)
-        font.setFmaily(constants.FONT_FAMILY)
+        font.setFamily(constants.FONT_FAMILY)
         item.setFont(font)
         item.setText(text)
         return item
@@ -283,7 +285,7 @@ class IconButton(QtGui.QToolButton):
     def __init__(self):
         super(IconButton, self).__init__()
         self.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-        self.setStyleSheet('QToolButton{background-color: transparent;}')
+        self.setStyleSheet('IconButton{background-color: transparent;}')
         self.setIconSize(QtCore.QSize(40, 40))
         self.pressed.connect(self.press)
         self.released.connect(self.release)
@@ -335,6 +337,9 @@ class IconWithWordsButton(IconButton):
 
 
 class TitleButton(QtGui.QPushButton):
+    rectColor = None
+    textColor = None
+
     def __init__(self, text=None, font_size=None, text_color=None, rect_color=None):
         super(TitleButton, self).__init__()
         font = self.font()
@@ -358,8 +363,10 @@ class TitleButton(QtGui.QPushButton):
         qp = QtGui.QPainter()
         qp.begin(self)
         try:
-            self.drawRect(qp, self.rectColor)
-            self.drawText(qp, self.textColor)
+            if self.rectColor:
+                self.drawRect(qp, self.rectColor)
+            if self.textColor:
+                self.drawText(qp, self.textColor)
             if not self.isEnabled():
                 self.drawBottomLine(qp, 4, QtGui.QColor('#6C9EFF'))
 
@@ -389,6 +396,7 @@ class TitleButton(QtGui.QPushButton):
 
 
 class MainTitleButton(TitleButton):
+
     def __init__(self, text=None, font_size=None, text_color=None, rect_color=None):
         super(MainTitleButton, self).__init__(text, font_size, text_color, rect_color)
 
@@ -510,6 +518,15 @@ class MyCheckBox(QtGui.QCheckBox):
     def setCheckedIcon(self, imageName):
         self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:checked {image: url('
                            '%s);}' % imageName)
+
+
+class MyProgressBar(QtGui.QProgressBar):
+
+    def __init__(self):
+        super(MyProgressBar, self).__init__()
+        self.setStyleSheet('QProgressBar{background-color: #2D2D2D; '
+                           'color: transparent; border: 2px solid #181818; border-radius: 3px; height: 8px}'
+                           'QProgressBar::chunk{background-color: #6C9EFF;}')
 
 
 class MyLabel(QtGui.QLabel):
@@ -701,21 +718,39 @@ class BaseListView(QtGui.QListWidget):
         else:
             return row
 
+    def itemByItemWidget(self, itemWidget):
+        for num in range(self.count()):
+            tempItem = self.item(num)
+            if itemWidget == self.itemWidget(tempItem):
+                return tempItem
+
+        return None
+
+
 class TestPlanListItem(HContainer):
 
-    def __init__(self, text=None):
+    def __init__(self, planItem):
         super(TestPlanListItem, self).__init__()
-
+        self.planItem = planItem
         self.checkWidget = VContainer()
         self.checkWidget.setFixedSize(30, 30)
-        self.label = MyLabel(text, font_size=12, color='#FFFFFF')
+        self.label = MyLabel(self.planItem.planName(), font_size=12, color='#FFFFFF')
         self.label.setFixedHeight(30)
         self.addWidget(self.checkWidget)
         self.addWidget(self.label)
         self.setContentsMargins(0, 0, 0, 0)
 
-    def text(self):
-        return self.label.text()
+    def planName(self):
+        return self.planItem.planName()
+
+    def createTime(self):
+        return self.planItem.createTime()
+
+    def index(self):
+        return self.planItem.index()
+
+    def actions(self):
+        return self.planItem.actions()
 
 
 class TestPlanListView(BaseListView):
@@ -730,7 +765,7 @@ class TestPlanListView(BaseListView):
     def haveItem(self, text):
         for num in range(self.count()):
             widget = self.itemWidget(self.item(num))
-            if widget.text() == text:
+            if widget.planName() == text:
                 return True
 
         return False
@@ -738,8 +773,9 @@ class TestPlanListView(BaseListView):
 
 class PlayQueueListItem(HContainer):
 
-    def __init__(self, text=None):
+    def __init__(self, playItem=None):
         super(PlayQueueListItem, self).__init__()
+        self.playItem = playItem
         self.box = MyCheckBox()
         self.box.setUncheckedIcon(constants.ICON_FOLDER+'/ic_add to q_normal.png')
         self.box.setCheckedIcon(constants.ICON_FOLDER+'/ic_confirm add to quene.png')
@@ -749,14 +785,20 @@ class PlayQueueListItem(HContainer):
         self.checkWidget = VContainer()
         self.checkWidget.addWidget(self.box)
         self.checkWidget.setFixedSize(30, 30)
-        self.label = MyLabel(text, font_size=12, color='#4F4F4F')
+        showText = '%s(%d to %d, %d)' % (self.playItem.playName(),
+                                         self.playItem.range()[0],
+                                         self.playItem.range()[1],
+                                         self.playItem.repeat())
+        self.label = MyLabel(showText, font_size=12, color='#4F4F4F')
         self.label.setFixedHeight(30)
         self.addWidget(self.checkWidget)
         self.addWidget(self.label)
         self.setContentsMargins(0, 0, 0, 0)
 
+        self.box.setChecked(True)
+
     def text(self):
-        return self.label.text()
+        return self.playItem.playName()
 
     def isChecked(self):
         return self.box.isChecked()
@@ -767,6 +809,21 @@ class PlayQueueListItem(HContainer):
                 self.label.setColor('#4F4F4F')
         else:
             self.label.setColor('#FFFFFF')
+
+    def actions(self):
+        return self.playItem.actions()
+
+    def playName(self):
+        return self.playItem.playName()
+
+    def range(self):
+        return self.playItem.range()
+
+    def repeat(self):
+        return self.playItem.repeat()
+
+    def actionsCount(self):
+        return len(self.playItem.actions())
 
     def onStateChange(self, identify, status):
         if status:
@@ -794,17 +851,26 @@ class PlayQueueListView(BaseListView):
 
 
 class ActionListItem(HContainer):
-    def __init__(self, i, text):
+
+    def __init__(self, autoSenseItem, index):
         super(ActionListItem, self).__init__()
-        self.indexLabel = MyLabel('%d' % i, font_size=12, color='#A0A0A0')
-        self.contentLabel = MyLabel('%s' % text, font_size=12, color='#FFFFFF')
-        self.indexLabel.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        self.indexLabel.setFixedSize(36, 30)
+        self.autoSenseItem = autoSenseItem
+        self.autoSenseItem.setIndex(str(index))
+        action = self.autoSenseItem.action()
+        if self.autoSenseItem.parameter():
+            action += ' [ ' + ','.join(str(p) for p in self.autoSenseItem.parameter()) + ' ]'
+        self.iconLabel = IconButton()
+        self.iconLabel.setIconSize(QtCore.QSize(30, 30))
+        self.iconLabel.setFixedSize(QtCore.QSize(30, 30))
+        self.indexLabel = MyLabel('%s' % self.autoSenseItem.index(), font_size=12, color='#A0A0A0')
+        self.contentLabel = MyLabel('%s' % action, font_size=12, color='#FFFFFF')
+        self.indexLabel.setFixedSize(30, 30)
         self.contentLabel.setFixedHeight(30)
-        self.mLayout.addWidget(self.indexLabel)
-        self.mLayout.addWidget(self.contentLabel)
-        self.mLayout.addStretch(1)
-        self.mLayout.setSpacing(24)
+        self.addWidget(self.iconLabel)
+        self.addWidget(self.indexLabel)
+        self.addWidget(self.contentLabel)
+        self.addStretch(1)
+        # self.setSpacing(24)
         self.setContentsMargins(0, 0, 0, 0)
         self.setBottomLine(True, '#333333')
 
@@ -813,6 +879,15 @@ class ActionListItem(HContainer):
 
     def setContent(self, content):
         self.contentLabel.setText('%s' % content)
+
+    def setSignal(self, icon):
+        self.iconLabel.setIcon(icon)
+
+    def tested(self):
+        return self.autoSenseItem.tested()
+
+    def setTested(self, state):
+        self.autoSenseItem.setTested(state)
 
 
 class ActionListView(BaseListView):
@@ -823,13 +898,6 @@ class ActionListView(BaseListView):
                            'ActionListView{background-color: transparent;}')
         if active_color:
             self.setActiveColor(active_color)
-
-    def addCustomItem(self, index, content):
-        actionListItem = ActionListItem(index + 1, content)
-        item = QtGui.QListWidgetItem()
-        item.setSizeHint(actionListItem.sizeHint())
-        self.insertItem(index, item)
-        self.setItemWidget(item, actionListItem)
 
 
 class DescriptionEdit(QtGui.QPlainTextEdit):

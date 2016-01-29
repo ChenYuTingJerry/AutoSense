@@ -208,7 +208,7 @@ class AdbDevice(object):
                 return {'answer': True, 'reason': 'it is the navigation bar'}
 
         if info['content-desc'] != '':
-            self.d(contentDescription=info['content-desc'])
+            self.d(description=info['content-desc']).click()
             return {'answer': True, 'reason': 'find by description'}
         if info['text'] != '':
             self.d(text=info['text']).click()
@@ -414,11 +414,12 @@ class AdbDevice(object):
         output = self.cmd.dumpsys(['display'])
         match = re.search('mCurrentOrientation=(?P<orientation>[\d])[\w\d\s\(\),-=]+'
                           + 'mCurrentDisplayRect=Rect\(0, 0 - (?P<width>[\d]+),\s+(?P<height>[\d]+)', output)
-        width = int(match.group('width'))
-        height = int(match.group('height'))
-        orientation = int(match.group('orientation'))
-        mode = 'landscape' if width > height else 'portrait'
-        return {'width': width, 'height': height, 'orientation': orientation, 'mode': mode}
+        if match:
+            width = int(match.group('width'))
+            height = int(match.group('height'))
+            orientation = int(match.group('orientation'))
+            mode = 'landscape' if width > height else 'portrait'
+            return {'width': width, 'height': height, 'orientation': orientation, 'mode': mode}
 
     def getRealDisplay(self):
         output = self.cmd.dumpsys(['display'])
