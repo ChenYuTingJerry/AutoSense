@@ -281,6 +281,7 @@ class IconButton(QtGui.QToolButton):
     normalIcon = None
     pressIcon = None
     isPress = False
+    ignoreMouse = False
 
     def __init__(self):
         super(IconButton, self).__init__()
@@ -307,12 +308,15 @@ class IconButton(QtGui.QToolButton):
         if self.normalIcon:
             self.setIcon(self.normalIcon)
 
+    def setIgnoreMouse(self, status):
+        self.ignoreMouse = status
+
     def leaveEvent(self, event):
-        if self.normalIcon:
+        if self.normalIcon and not self.ignoreMouse:
             self.setIcon(self.normalIcon)
 
     def enterEvent(self, event):
-        if self.pressIcon:
+        if self.pressIcon and not self.ignoreMouse:
             self.setIcon(self.pressIcon)
 
 
@@ -320,8 +324,8 @@ class IconWithWordsButton(IconButton):
     def __init__(self, text=None, font_size=None, font_weight=None, text_color=None):
         super(IconWithWordsButton, self).__init__()
         self.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
-        self.setStyleSheet('QToolButton{background-color: transparent; color: %s}'
-                           'QToolButton::menu-indicator { image: none; }' % text_color)
+        self.setStyleSheet('IconWithWordsButton{background-color: transparent; color: %s}'
+                           'IconWithWordsButton::menu-indicator { image: none; }' % text_color)
         font = self.font()
         font.setFamily(constants.FONT_FAMILY)
         if font_size:
@@ -334,6 +338,31 @@ class IconWithWordsButton(IconButton):
             font.setWeight(font_weight)
 
         self.setFont(font)
+
+
+class MenuButton(IconButton):
+    def __init__(self, text=None, font_size=None, font_weight=None, text_color=None):
+        super(MenuButton, self).__init__()
+        self.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.setStyleSheet('MenuButton{background-color: transparent; color: %s}' % text_color)
+
+        font = self.font()
+        font.setFamily(constants.FONT_FAMILY)
+        if font_size:
+            font.setPixelSize(font_size)
+
+        if text:
+            self.setText(text)
+
+        if font_weight:
+            font.setWeight(font_weight)
+
+        self.setFont(font)
+
+    def setMenuIndicator(self, normalPic, pressPic=None):
+        self.setStyleSheet(self.styleSheet() + 'MenuButton::menu-indicator { image: url(%s);}' % normalPic)
+        if pressPic:
+            self.setStyleSheet(self.styleSheet() + 'MenuButton::menu-indicator:open { image: url(%s);}' % pressPic)
 
 
 class TitleButton(QtGui.QPushButton):
@@ -683,6 +712,13 @@ class BaseListView(QtGui.QListWidget):
         super(BaseListView, self).__init__()
         self.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
         self.setSelectionMode(QtGui.QAbstractItemView.NoSelection)
+        self.setStyleSheet(
+        '''
+        QScrollBar {background: transparent; width: 10px; height: 10px}
+        QScrollBar::add-line, QScrollBar::sub-line{ background: transparent;}
+        QScrollBar::add-page, QScrollBar::sub-page{ background: transparent;}
+        QScrollBar::handle {background: #282828; border: 5px solid #282828; border-radius: 5px;}
+        ''')
 
     def addStyleSheet(self, styleSheet=''):
         self.setStyleSheet(self.styleSheet() + styleSheet)
@@ -723,8 +759,44 @@ class BaseListView(QtGui.QListWidget):
             tempItem = self.item(num)
             if itemWidget == self.itemWidget(tempItem):
                 return tempItem
-
         return None
+
+    def itemWidgetByRow(self, row):
+        return self.itemWidget(self.item(row))
+
+
+class MenuListView(BaseListView):
+
+    itemDelete = QtCore.Signal(int ,QtGui.QListWidgetItem, QtGui.QWidget)
+
+    def __init__(self, active_color=None):
+        super(MenuListView, self).__init__()
+        self.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.menuOpen)
+        self.addStyleSheet('MenuListView::item{border-bottom: 1px solid #181818; }'
+                           'MenuListView{background-color: transparent;}')
+        if active_color:
+            self.setActiveColor(active_color)
+
+    def haveItem(self, text):
+        for num in range(self.count()):
+            widget = self.itemWidget(self.item(num))
+            if widget.planName() == text:
+                return True
+        return False
+
+    def menuOpen(self, pos):
+        listItem = self.itemAt(pos)
+        if listItem:
+            row = self.row(listItem)
+            self.setCurrentRow(row)
+            menu = QtGui.QMenu()
+            deleteAct = menu.addAction("Delete\t")
+            action = menu.exec_(self.mapToGlobal(pos))
+            if action == deleteAct:
+                listItemWidget = self.itemWidget(listItem)
+                self.itemDelete.emit(row, self.takeItem(row), listItemWidget)
 
 
 class TestPlanListItem(HContainer):
@@ -752,23 +824,13 @@ class TestPlanListItem(HContainer):
     def actions(self):
         return self.planItem.actions()
 
+    def text(self):
+        return self.label.text()
 
-class TestPlanListView(BaseListView):
+
+class TestPlanListView(MenuListView):
     def __init__(self, active_color=None):
-        super(TestPlanListView, self).__init__()
-        self.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
-        self.addStyleSheet('TestPlanListView::item{border-bottom: 1px solid #181818; }'
-                           'TestPlanListView{background-color: transparent;}')
-        if active_color:
-            self.setActiveColor(active_color)
-
-    def haveItem(self, text):
-        for num in range(self.count()):
-            widget = self.itemWidget(self.item(num))
-            if widget.planName() == text:
-                return True
-
-        return False
+        super(TestPlanListView, self).__init__(active_color)
 
 
 class PlayQueueListItem(HContainer):
@@ -798,7 +860,7 @@ class PlayQueueListItem(HContainer):
         self.box.setChecked(True)
 
     def text(self):
-        return self.playItem.playName()
+        return self.label.text()
 
     def isChecked(self):
         return self.box.isChecked()
@@ -832,22 +894,9 @@ class PlayQueueListItem(HContainer):
             self.label.setColor('#4F4F4F')
 
 
-class PlayQueueListView(BaseListView):
+class PlayQueueListView(MenuListView):
     def __init__(self, active_color=None):
-        super(PlayQueueListView, self).__init__()
-        self.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
-        self.addStyleSheet('PlayQueueListView::item{border-bottom: 1px solid #181818; }'
-                           'PlayQueueListView{background-color: transparent;}')
-        if active_color:
-            self.setActiveColor(active_color)
-
-    def haveItem(self, text):
-        for num in range(self.count()):
-            widget = self.itemWidget(self.item(num))
-            if widget.text() == text:
-                return True
-
-        return False
+        super(PlayQueueListView, self).__init__(active_color)
 
 
 class ActionListItem(HContainer):
@@ -855,7 +904,7 @@ class ActionListItem(HContainer):
     def __init__(self, autoSenseItem, index):
         super(ActionListItem, self).__init__()
         self.autoSenseItem = autoSenseItem
-        self.autoSenseItem.setIndex(str(index))
+        self.autoSenseItem.setIndex(index)
         action = self.autoSenseItem.action()
         if self.autoSenseItem.parameter():
             action += ' [ ' + ','.join(str(p) for p in self.autoSenseItem.parameter()) + ' ]'
@@ -870,7 +919,6 @@ class ActionListItem(HContainer):
         self.addWidget(self.indexLabel)
         self.addWidget(self.contentLabel)
         self.addStretch(1)
-        # self.setSpacing(24)
         self.setContentsMargins(0, 0, 0, 0)
         self.setBottomLine(True, '#333333')
 
@@ -886,18 +934,39 @@ class ActionListItem(HContainer):
     def tested(self):
         return self.autoSenseItem.tested()
 
+    def text(self):
+        return self.contentLabel.text()
+
     def setTested(self, state):
         self.autoSenseItem.setTested(state)
 
 
-class ActionListView(BaseListView):
+class ActionListView(MenuListView):
+
+    takeItemsDone = QtCore.Signal(list)
+
     def __init__(self, active_color=None):
-        super(ActionListView, self).__init__()
-        self.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
-        self.addStyleSheet('ActionListView::item{border-bottom: 1px solid #181818; }'
-                           'ActionListView{background-color: transparent;}')
-        if active_color:
-            self.setActiveColor(active_color)
+        super(ActionListView, self).__init__(active_color)
+        self.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
+
+    def menuOpen(self, pos):
+        listItem = self.itemAt(pos)
+        if listItem:
+            menu = QtGui.QMenu()
+            deleteAct = menu.addAction("Delete\t")
+            action = menu.exec_(self.mapToGlobal(pos))
+            if action == deleteAct:
+                deletedList = list()
+                for item in self.selectedItems():
+                    temp = dict()
+                    listItemWidget = self.itemWidget(item)
+                    index = self.row(item)
+                    temp['row'] = index
+                    temp['take_item'] = self.takeItem(index)
+                    temp['item_widget'] = listItemWidget
+                    deletedList.append(temp)
+                deletedList.reverse()
+                self.takeItemsDone.emit(deletedList)
 
 
 class DescriptionEdit(QtGui.QPlainTextEdit):
@@ -1147,12 +1216,16 @@ class MediaCheckDialog(QtGui.QDialog):
 
     def __init__(self):
         super(MediaCheckDialog, self).__init__()
+
         self.setWindowTitle('Media check')
         layout = QtGui.QVBoxLayout(self)
+
         self.edit1 = QtGui.QLineEdit()
+        self.edit1.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
         self.edit1.setInputMask('0000000')
         self.edit1.setAlignment(QtCore.Qt.AlignCenter)
         self.edit2 = QtGui.QLineEdit()
+        self.edit2.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
         self.edit2.setInputMask('0000000')
         self.edit2.setAlignment(QtCore.Qt.AlignCenter)
         self.label1 = MyLabel('test-time(sec.):')
