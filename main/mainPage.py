@@ -2484,7 +2484,10 @@ class PlayListPage(VContainer):
         self.combineWidget.addWidget(self.aboutDeviceWidget)
 
     def abortProcess(self):
-        self.notifyPages.emit(0)
+        result = QtGui.QMessageBox.warning(self, 'Warning', 'Do you want to abort? \n(It will lose testing result.)'
+                          , QtGui.QMessageBox.Abort, QtGui.QMessageBox.Cancel)
+        if result == QtGui.QMessageBox.Abort:
+            self.notifyPages.emit(0)
 
     def testPlanItemDeleted(self, row, item, widget):
         del self.planDict[widget.text()]
@@ -2731,7 +2734,7 @@ class PlayListPage(VContainer):
             actionList = self.planDict.get(self.getCurrentPlanName()).actions()
             for i in range(len(actionList)):
                 actionListItem = ActionListItem(actionList[i], i+1)
-                if self.currentPage == 0:
+                if self.currentPage == 0 or self.sideStack.currentIndex() == 0:
                     actionListItem.setSignal(QtGui.QIcon(''))
                 elif self.isRunning:
                     actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_normal.png'))
