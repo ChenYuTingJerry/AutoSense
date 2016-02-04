@@ -78,7 +78,7 @@ class RunScript(QtCore.QThread):
             'NoExist': self.actionCheckNoExist,
             'IsBlank': self.actionCheckBlank,
             'Type': self.actionType,
-            'MediaCheck':self.actionMediaCheck,
+            'MediaCheck': self.actionMediaCheck,
             'HideKeyboard': self.actionHideKeyboard}
 
     def setTimes(self, times):
@@ -140,6 +140,7 @@ class RunScript(QtCore.QThread):
             time.sleep(0.1)
 
     def actionMediaCheck(self, param, refer=None):
+        print 'param = '+str(param)
         t, timeout, isHold = param
         result = self.checkMedia(int(t), int(timeout), isHold)
         if result is not None:
@@ -2669,6 +2670,8 @@ class PlayListPage(VContainer):
                 self.virtualScreen.update()
         except IndexError as e:
             print 'IndexError: ' + e.message
+        except OSError as e:
+            print 'OSError: ' + e.message
 
     def calculateScale(self, displayInfo, size):
         width = displayInfo['width']
@@ -2860,9 +2863,12 @@ class PlayListPage(VContainer):
             workExecutor(self._device.type, (text))
 
     def pressMediaCheck(self):
-        testTime, timeout, ok = MediaCheckDialog.getCheckTime()
+        testTime, timeout, isChecked, ok = MediaCheckDialog.getCheckTime()
         if ok and len(testTime) != 0 and len(timeout) != 0:
-            self.addListItem('MediaCheck', param=[testTime, timeout])
+            if isChecked:
+                self.addListItem('MediaCheck', param=[testTime, timeout, 'True'])
+            else:
+                self.addListItem('MediaCheck', param=[testTime, timeout, 'False'])
 
     def pressDelay(self):
         inputDelay, ok = DelayDialog.getDelay()

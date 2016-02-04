@@ -1230,12 +1230,14 @@ class MediaCheckDialog(QtGui.QDialog):
         self.edit2.setAlignment(QtCore.Qt.AlignCenter)
         self.label1 = MyLabel('test-time(sec.):')
         self.label2 = MyLabel('timeout(sec.):')
+        self.checkBox = QtGui.QCheckBox('hold to media finished')
 
         layout.addWidget(self.label1)
-        layout.addWidget(self.edit1, 0, 1)
+        layout.addWidget(self.edit1, 0, 0)
         layout.addWidget(self.label2)
-        layout.addWidget(self.edit2, 1, 1)
+        layout.addWidget(self.edit2, 1, 0)
         layout.addStretch(1)
+        layout.addWidget(self.checkBox, 2, 1)
         buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -1248,8 +1250,11 @@ class MediaCheckDialog(QtGui.QDialog):
     def getTimeout(self):
         return self.edit2.text()
 
+    def isChecked(self):
+        return self.checkBox.isChecked()
+
     @staticmethod
     def getCheckTime():
         window = MediaCheckDialog()
         result = window.exec_()
-        return window.getTestTime(), window.getTimeout(), result
+        return window.getTestTime(), window.getTimeout(), window.isChecked(), result
