@@ -425,7 +425,6 @@ class TitleButton(QtGui.QPushButton):
 
 
 class MainTitleButton(TitleButton):
-
     def __init__(self, text=None, font_size=None, text_color=None, rect_color=None):
         super(MainTitleButton, self).__init__(text, font_size, text_color, rect_color)
 
@@ -492,6 +491,29 @@ class SettingIconButton(IconWithWordsButton):
         qp.drawPie(rectangle, startAngle, spanAngle)
 
 
+class MyButton(QtGui.QToolButton):
+
+    def __init__(self, text, font_size=None, font_color=None):
+        super(MyButton, self).__init__()
+        self.setStyleSheet('MyButton{background-color: transparent; border: 2px solid #A0A0A0;'
+                           'border-radius: 12px; height: 24px; width: 80px}')
+        font = self.font()
+        font.setFamily('Open Sans')
+        if text:
+            self.setText(text)
+
+        if font_size:
+            font.setPixelSize(font_size)
+
+        if font_color:
+            self.setColor(font_color)
+
+        self.setFont(font)
+
+    def setColor(self, color):
+        self.setStyleSheet(self.styleSheet()+'MyButton{color: %s;}' % color)
+
+
 class MyGroup(QtGui.QGroupBox):
     def __init__(self, text=None, font_size=None):
         super(MyGroup, self).__init__()
@@ -537,20 +559,19 @@ class MyCheckBox(QtGui.QCheckBox):
         self.onStateChanged.emit(self.identity, state)
 
     def setUncheckedIcon(self, imageName):
-        self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:unchecked {image: url('
-                           '%s);}' % imageName)
+        self.setStyleSheet(self.styleSheet() + ' QCheckBox::indicator:unchecked {image: url('
+                                               '%s);}' % imageName)
 
     def setHoverIcon(self, imageName):
-        self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:unchecked:hover {image: url('
-                           '%s);}' % imageName)
+        self.setStyleSheet(self.styleSheet() + ' QCheckBox::indicator:unchecked:hover {image: url('
+                                               '%s);}' % imageName)
 
     def setCheckedIcon(self, imageName):
-        self.setStyleSheet(self.styleSheet()+' QCheckBox::indicator:checked {image: url('
-                           '%s);}' % imageName)
+        self.setStyleSheet(self.styleSheet() + ' QCheckBox::indicator:checked {image: url('
+                                               '%s);}' % imageName)
 
 
 class MyProgressBar(QtGui.QProgressBar):
-
     def __init__(self):
         super(MyProgressBar, self).__init__()
         self.setStyleSheet('QProgressBar{background-color: #2D2D2D; '
@@ -713,7 +734,7 @@ class BaseListView(QtGui.QListWidget):
         self.setAttribute(QtCore.Qt.WA_MacShowFocusRect, 0)
         self.setSelectionMode(QtGui.QAbstractItemView.NoSelection)
         self.setStyleSheet(
-        '''
+            '''
         QScrollBar {background: transparent; width: 10px; height: 10px}
         QScrollBar::add-line, QScrollBar::sub-line{ background: transparent;}
         QScrollBar::add-page, QScrollBar::sub-page{ background: transparent;}
@@ -766,8 +787,7 @@ class BaseListView(QtGui.QListWidget):
 
 
 class MenuListView(BaseListView):
-
-    itemDelete = QtCore.Signal(int ,QtGui.QListWidgetItem, QtGui.QWidget)
+    itemDelete = QtCore.Signal(int, QtGui.QListWidgetItem, QtGui.QWidget)
 
     def __init__(self, active_color=None):
         super(MenuListView, self).__init__()
@@ -800,7 +820,6 @@ class MenuListView(BaseListView):
 
 
 class TestPlanListItem(HContainer):
-
     def __init__(self, planItem):
         super(TestPlanListItem, self).__init__()
         self.planItem = planItem
@@ -834,20 +853,19 @@ class TestPlanListView(MenuListView):
 
 
 class PlayQueueListItem(HContainer):
-
     def __init__(self, playItem=None):
         super(PlayQueueListItem, self).__init__()
         self.playItem = playItem
         self.box = MyCheckBox()
-        self.box.setUncheckedIcon(constants.ICON_FOLDER+'/ic_add to q_normal.png')
-        self.box.setCheckedIcon(constants.ICON_FOLDER+'/ic_confirm add to quene.png')
-        self.box.setHoverIcon(constants.ICON_FOLDER+'/ic_add to q_press.png')
+        self.box.setUncheckedIcon(constants.ICON_FOLDER + '/ic_add to q_normal.png')
+        self.box.setCheckedIcon(constants.ICON_FOLDER + '/ic_confirm add to quene.png')
+        self.box.setHoverIcon(constants.ICON_FOLDER + '/ic_add to q_press.png')
         self.box.onStateChanged.connect(self.onStateChange)
 
         self.checkWidget = VContainer()
         self.checkWidget.addWidget(self.box)
         self.checkWidget.setFixedSize(30, 30)
-        showText = '%s(%d to %d, %d)' % (self.playItem.playName(),
+        showText = '%s (%d to %d, %d)' % (self.playItem.playName(),
                                          self.playItem.range()[0],
                                          self.playItem.range()[1],
                                          self.playItem.repeat())
@@ -900,7 +918,6 @@ class PlayQueueListView(MenuListView):
 
 
 class ActionListItem(HContainer):
-
     def __init__(self, autoSenseItem, index):
         super(ActionListItem, self).__init__()
         self.autoSenseItem = autoSenseItem
@@ -942,7 +959,6 @@ class ActionListItem(HContainer):
 
 
 class ActionListView(MenuListView):
-
     takeItemsDone = QtCore.Signal(list)
 
     def __init__(self, active_color=None):
@@ -969,18 +985,24 @@ class ActionListView(MenuListView):
                 self.takeItemsDone.emit(deletedList)
 
 
-class DescriptionEdit(QtGui.QPlainTextEdit):
-
+class MyPlainTextEdit(QtGui.QPlainTextEdit):
     focusIn = QtCore.Signal()
     focusOut = QtCore.Signal()
 
-    def __init__(self):
-        super(DescriptionEdit, self).__init__()
-        self.setStyleSheet('DescriptionEdit{border: 1px solid #404040; background-color: transparent; '
-                           'color: #FFFFFF}')
+    def __init__(self, font_color=None, text=None, font_size=None):
+        super(MyPlainTextEdit, self).__init__()
+        self.setStyleSheet('MyPlainTextEdit{border: 1px solid #404040; background-color: transparent;}')
         font = self.font()
         font.setFamily(constants.FONT_FAMILY)
-        font.setPixelSize(10)
+        if font_size:
+            font.setPixelSize(font_size)
+
+        if text:
+            self.setPlainText(text)
+
+        if font_color:
+            self.setColor(font_color)
+
         self.setFont(font)
 
     def focusInEvent(self, event):
@@ -988,6 +1010,9 @@ class DescriptionEdit(QtGui.QPlainTextEdit):
 
     def focusOutEvent(self, event):
         self.focusOut.emit()
+
+    def setColor(self, color):
+        self.setStyleSheet(self.styleSheet()+'MyPlainTextEdit{color: %s;}' % color)
 
 
 class BottomLineWidget(HContainer):
@@ -1016,17 +1041,19 @@ class PictureLabel(QtGui.QLabel):
     mouseSwipe = QtCore.Signal(QtCore.QPoint, QtCore.QPoint, int)
     mouseDrag = QtCore.Signal(QtCore.QPoint, QtCore.QPoint, int)
     checkClick = QtCore.Signal(QtCore.QPoint, str)
-    checkRelativeClick = QtCore.Signal(QtCore.QPoint, QtCore.QPoint)
+    checkRelativeClick = QtCore.Signal(QtCore.QPoint)
+    checkRelativeDone = QtCore.Signal(QtCore.QPoint, QtCore.QPoint)
     dragFrom = None
     dragTo = None
-    refPoint = None
     isRelease = True
     isStartLoad = True
     isMouseIgnored = False
     isDrawGrid = True
     isDrawRelativeGrid = False
+    isSelecting = False
     check_type = None
     viewHierarchy = None
+    relativePivot = None
     rects = []
     image = QtGui.QImage()
 
@@ -1063,16 +1090,21 @@ class PictureLabel(QtGui.QLabel):
                     self.mouseSwipe.emit(self.dragFrom, self.dragTo, elapse_time)
                 else:
                     self.mouseDrag.emit(self.dragFrom, self.dragTo, elapse_time)
-
             self.update()
         elif self.isDrawGrid:
             self.dragTo = event.pos()
             if self.dragFrom == self.dragTo:
-                if not self.isDrawRelativeGrid:
-                    self.checkClick.emit(self.dragTo, self.check_type)
+                if self.isDrawRelativeGrid:
+                    if not self.isSelecting:
+                        self.isSelecting = True
+                        self.relativePivot = self.dragTo
+                        self.checkRelativeClick.emit(self.dragTo)
+                    elif self.isClickInRelative(self.dragTo):
+                        self.isSelecting = False
+                        self.isDrawRelativeGrid = False
+                        self.checkRelativeDone.emit(self.relativePivot, self.dragTo)
                 else:
-                    self.isDrawRelativeGrid = False
-                    self.checkRelativeClick.emit(self.refPoint, self.dragTo)
+                    self.checkClick.emit(self.dragTo, self.check_type)
 
     def redrawLine(self, dragFrom, dragTo):
         self.dragFrom = dragFrom
@@ -1088,46 +1120,72 @@ class PictureLabel(QtGui.QLabel):
         self.isDrawGrid = False
 
     def set_check_type(self, set_type):
+        if set_type == 'RelativeExist':
+            self.isDrawRelativeGrid = True
+        else:
+            self.isDrawGrid = True
         self.check_type = set_type
 
+    def analysisBounds(self, boundsInfo):
+        output = re.match('\[(?P<x1>[\d]+),(?P<y1>[\d]+)\]\[(?P<x2>[\d]+),(?P<y2>[\d]+)\]', boundsInfo)
+        x1 = int(output.group('x1'))
+        y1 = int(output.group('y1'))
+        x2 = int(output.group('x2'))
+        y2 = int(output.group('y2'))
+        item = dict()
+        item['width'] = x2 - x1
+        item['height'] = y2 - y1
+        item['point'] = QtCore.QPoint(x1, y1)
+        item['point_end'] = QtCore.QPoint(x2, y2)
+        return item
+
     def drawGrid(self, view_hierarchy, set_type):
-        self.isDrawGrid = True
         self.set_check_type(set_type)
-        root = ET.fromstring(view_hierarchy)
+        self.root = ET.fromstring(view_hierarchy)
         del self.rects[:]
-        for node in root.iter('node'):
-            output = re.match('\[(?P<x1>[\d]+),(?P<x2>[\d]+)\]\[(?P<y1>[\d]+),(?P<y2>[\d]+)\]', node.get('bounds'))
-            x1 = int(output.group('x1'))
-            x2 = int(output.group('x2'))
-            y1 = int(output.group('y1'))
-            y2 = int(output.group('y2'))
-            item = dict()
-            item['width'] = y1 - x1
-            item['height'] = y2 - x2
-            item['point'] = QtCore.QPoint(x1, x2)
-            self.rects.append(item)
+        for node in self.root.iter('node'):
+            self.rects.append(self.analysisBounds(node.get('bounds')))
         self.update()
 
-    def drawRelativeGrid(self, view_hierarchy, point):
-        print 'draw_relative_grid' + str(point.x()) + ', ' + str(point.y())
-        self.isDrawRelativeGrid = True
-        self.refPoint = point
-        root = ET.fromstring(view_hierarchy)
+    def isClickInRelative(self, point):
+        for rect in self.rects:
+            print rect
+            if rect['point'].x() <= point.x()/self.ratio <= rect['point_end'].x():
+                if rect['point'].y() <= point.y()/self.ratio <= rect['point_end'].y():
+                    return True
+        return False
+
+    def drawRelativeGrid(self, boundsInfo):
+        targetItem = self.analysisBounds(boundsInfo)
         del self.rects[:]
-        for node in root.iter('node'):
-            output = re.match('\[(?P<x1>[\d]+),(?P<x2>[\d]+)\]\[(?P<y1>[\d]+),(?P<y2>[\d]+)\]', node.get('bounds'))
-            x1 = int(output.group('x1'))
-            x2 = int(output.group('x2'))
-            y1 = int(output.group('y1'))
-            y2 = int(output.group('y2'))
-            if x1 <= point.x() <= point.y():
-                item = dict()
-                item['width'] = y1 - x1
-                item['height'] = y2 - x2
-                item['point'] = QtCore.QPoint(x1, x2)
+        for node in self.root.iter('node'):
+            item = self.analysisBounds(node.get('bounds'))
+            if self.isRelativeView(targetItem, item):
                 self.rects.append(item)
-
         self.update()
+
+    def isRelativeView(self, origin, relative):
+        if relative['point_end'].x() <= origin['point'].x():
+            if origin['point'].y() <= relative['point'].y() <= origin['point_end'].y():
+                if origin['point'].y() <= relative['point_end'].y() <= origin['point_end'].y():
+                    return True
+
+        if relative['point_end'].x() >= origin['point'].x():
+            if origin['point'].y() <= relative['point'].y() <= origin['point_end'].y():
+                if origin['point'].y() <= relative['point_end'].y() <= origin['point_end'].y():
+                    return True
+
+        if relative['point_end'].y() <= origin['point'].y():
+            if origin['point'].x() <= relative['point'].x() <= origin['point_end'].x():
+                if origin['point'].x() <= relative['point_end'].x() <= origin['point_end'].x():
+                    return True
+
+        if relative['point_end'].y() >= origin['point'].y():
+            if origin['point'].x() <= relative['point'].x() <= origin['point_end'].x():
+                if origin['point'].x() <= relative['point_end'].x() <= origin['point_end'].x():
+                    return True
+
+        return False;
 
     def paintEvent(self, event):
         if self.pixmap() is not None:
@@ -1184,7 +1242,6 @@ class PictureLabel(QtGui.QLabel):
 
 
 class DelayDialog(QtGui.QDialog):
-
     def __init__(self):
         super(DelayDialog, self).__init__()
         self.setWindowTitle('Delay')
@@ -1213,7 +1270,6 @@ class DelayDialog(QtGui.QDialog):
 
 
 class MediaCheckDialog(QtGui.QDialog):
-
     def __init__(self):
         super(MediaCheckDialog, self).__init__()
 

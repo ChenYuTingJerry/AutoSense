@@ -270,14 +270,11 @@ class AdbDevice(object):
 
     @staticmethod
     def _parseRange(point, point1, point2):
-        if point[0] >= point1[0] and point[0] <= point2[0]:
-            if point[1] >= point1[1] and point[1] <= point2[1]:
-                area = (point2[0] - point1[0]) * (point2[1] - point1[1])
-                return (True, area)
-            else:
-                return (False, None)
+        if point1[0] <= point[0] <= point2[0] and point1[1] <= point[1] <= point2[1]:
+            area = (point2[0] - point1[0]) * (point2[1] - point1[1])
+            return True, area
         else:
-            return (False, None)
+            return False, None
 
     def viewFilter(self, view):
         if view.getClass() == self.viewClass:
