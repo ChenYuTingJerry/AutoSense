@@ -21,6 +21,10 @@ CHECKED = 'checked'
 TESTED = 'tested'
 REPEAT = 'repeat'
 CREATE_TIME = 'createTime'
+PASS = 0
+FAIL = -1
+SEMI = 1
+NORMAL = 2
 
 
 class AutoSenseItem(object):
@@ -30,7 +34,7 @@ class AutoSenseItem(object):
                          PARAMETER: '',
                          DESCRIPTION: '',
                          INFORMATION: '',
-                         TESTED: 0}
+                         TESTED: NORMAL}
 
         if content:
             self.analysis(content)
@@ -41,6 +45,7 @@ class AutoSenseItem(object):
         self.setAnnotation(content[DESCRIPTION])
         self.setInformation(content[INFORMATION], encode=False)
         self.setParameter(content[PARAMETER])
+        # self.setTested(content[TESTED])
 
     def setIndex(self, value):
         self.itemDict[INDEX] = str(value)
@@ -230,3 +235,49 @@ class TestPlanItem(object):
 
     def createTime(self):
         return self.itemDict.get(CREATE_TIME)
+
+
+class TestResultItem(object):
+    _total = 0
+    _passed = 0
+    _failed = 0
+    _semi = 0
+    _pass_ratio = 0
+    _fail_ratio = 0
+    _semi_ratio = 0
+
+    def __init__(self, testResults):
+        self.__calculate__(testResults)
+
+    def __calculate__(self, items):
+        self._total = len(items)
+        for item in items:
+            if item.action() == 'CheckPoint':
+                self._semi += 1
+
+            if item.tested() == PASS:
+                self._passed += 1
+            elif item.tested() == FAIL:
+                self._failed += 1
+
+        self._pass_ratio = self._passed * 100 / self._total
+        self._fail_ratio = 100 - self._pass_ratio
+        self._semi_ratio = self._semi * 100 / self._total
+
+    def pass_count(self):
+        return self._passed
+
+    def fail_count(self):
+        return self._failed
+
+    def semi_ratio(self):
+        return self._semi_ratio
+
+    def pass_ratio(self):
+        return self._pass_ratio
+
+    def fail_ratio(self):
+        return self._fail_ratio
+
+    def total_count(self):
+        return self._total

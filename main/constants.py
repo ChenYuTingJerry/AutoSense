@@ -9,7 +9,7 @@ PRIVATE_FOLDER = ROOT_FOLDER + '/_data'
 LOG_FOLDER = folder.get_current_dir(__file__) + '/log'
 SOUND_FOLDER = folder.get_current_dir(__file__) + '/sound'
 APK_FOLDER = folder.get_current_dir(__file__) + '/apk'
-IMAGE_FOLDER = folder.get_current_dir(__file__) + '/image'
+IMAGE_FOLDER = ROOT_FOLDER + '/image'
 SCRIPT_FOLDER = ROOT_FOLDER + '/script'
 
 WIFI = 'wifi'

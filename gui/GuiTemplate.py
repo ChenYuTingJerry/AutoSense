@@ -299,12 +299,10 @@ class IconButton(QtGui.QToolButton):
         self.pressIcon = icon
 
     def press(self):
-        print 'press'
         if self.pressIcon:
             self.setIcon(self.pressIcon)
 
     def release(self):
-        print 'release'
         if self.normalIcon:
             self.setIcon(self.normalIcon)
 
@@ -492,10 +490,9 @@ class SettingIconButton(IconWithWordsButton):
 
 
 class MyButton(QtGui.QToolButton):
-
     def __init__(self, text, font_size=None, font_color=None):
         super(MyButton, self).__init__()
-        self.setStyleSheet('MyButton{background-color: transparent; border: 2px solid #A0A0A0;'
+        self.setStyleSheet('MyButton{background-color: transparent; border: 1px solid #A0A0A0;'
                            'border-radius: 12px; height: 24px; width: 80px}')
         font = self.font()
         font.setFamily('Open Sans')
@@ -511,7 +508,7 @@ class MyButton(QtGui.QToolButton):
         self.setFont(font)
 
     def setColor(self, color):
-        self.setStyleSheet(self.styleSheet()+'MyButton{color: %s;}' % color)
+        self.setStyleSheet(self.styleSheet() + 'MyButton{color: %s;}' % color)
 
 
 class MyGroup(QtGui.QGroupBox):
@@ -599,7 +596,10 @@ class MyLabel(QtGui.QLabel):
         self.setFont(font)
 
     def setColor(self, color):
-        self.setStyleSheet('color: %s;' % color)
+        self.setStyleSheet(self.styleSheet() + 'color: %s;' % color)
+
+    def setBoader(self, color):
+        self.setStyleSheet(self.styleSheet() + 'border: 1px solid %s;' % color)
 
 
 class MyLineEdit(QtGui.QLineEdit):
@@ -866,9 +866,9 @@ class PlayQueueListItem(HContainer):
         self.checkWidget.addWidget(self.box)
         self.checkWidget.setFixedSize(30, 30)
         showText = '%s (%d to %d, %d)' % (self.playItem.playName(),
-                                         self.playItem.range()[0],
-                                         self.playItem.range()[1],
-                                         self.playItem.repeat())
+                                          self.playItem.range()[0],
+                                          self.playItem.range()[1],
+                                          self.playItem.repeat())
         self.label = MyLabel(showText, font_size=12, color='#4F4F4F')
         self.label.setFixedHeight(30)
         self.addWidget(self.checkWidget)
@@ -938,6 +938,12 @@ class ActionListItem(HContainer):
         self.addStretch(1)
         self.setContentsMargins(0, 0, 0, 0)
         self.setBottomLine(True, '#333333')
+
+    def action(self):
+        return self.autoSenseItem.action()
+
+    def index(self):
+        return self.autoSenseItem.index()
 
     def setIndex(self, index):
         self.indexLabel.setText('%d' % index)
@@ -1012,7 +1018,7 @@ class MyPlainTextEdit(QtGui.QPlainTextEdit):
         self.focusOut.emit()
 
     def setColor(self, color):
-        self.setStyleSheet(self.styleSheet()+'MyPlainTextEdit{color: %s;}' % color)
+        self.setStyleSheet(self.styleSheet() + 'MyPlainTextEdit{color: %s;}' % color)
 
 
 class BottomLineWidget(HContainer):
@@ -1033,6 +1039,71 @@ class BottomLineWidget(HContainer):
         pen.setBrush(color)
         qp.setPen(pen)
         qp.drawLine(self.rect().bottomLeft(), self.rect().bottomRight())
+
+
+class DonutPie(QtGui.QLabel):
+    _radius = 0
+    _thickness = 0
+    _color = None
+    _second_color = None
+    _span_angle = 0
+    _start_angle = 0
+
+    def __init__(self, radius=None, thickness=None, color=None, second_color=None):
+        super(DonutPie, self).__init__()
+        if radius:
+            self.setRadius(radius)
+
+        if thickness:
+            self._thickness = thickness
+
+        if color:
+            self._color = color
+
+        if second_color:
+            self._second_color = second_color
+
+    def paintEvent(self, event):
+        qp = QtGui.QPainter()
+        qp.begin(self)
+        try:
+            self.drawRect(qp, '#404040')
+            self.drawPie(qp, self._second_color, self._radius, 0, 360)
+            self.drawPie(qp, self._color, self._radius, self._start_angle, self._span_angle)
+            self.drawPie(qp, '#181818', self._radius - self._thickness, 0, 360)
+        finally:
+            qp.end()
+
+    def setRadius(self, radius):
+        self._radius = radius
+
+    def setThickness(self, thickness):
+        self._thickness = thickness
+
+    def setColor(self, color):
+        self._color = color
+
+    def setSecondColor(self, color):
+        self._second_color = color
+
+    def setStartAngle(self, angle):
+        self._start_angle = angle
+
+    def setSpanAngle(self, angle):
+        self._span_angle = angle
+
+    def drawPie(self, qp, color, radius, start_angle, span_angle):
+        qp.setBrush(QtGui.QColor(color))
+        qp.setPen(QtGui.QColor(color))
+        rectangle = QtCore.QRect(self.rect().center().x() - radius, self.rect().center().y() - radius,
+                                 radius * 2, radius * 2)
+        startAngle = start_angle * 16
+        spanAngle = span_angle * 16
+        qp.drawPie(rectangle, startAngle, spanAngle)
+
+    def drawRect(self, qp, color):
+        qp.setPen(QtGui.QColor(color))
+        qp.drawRect(0, 9, self.width()-1, self.height()-10)
 
 
 class PictureLabel(QtGui.QLabel):
@@ -1150,8 +1221,8 @@ class PictureLabel(QtGui.QLabel):
     def isClickInRelative(self, point):
         for rect in self.rects:
             print rect
-            if rect['point'].x() <= point.x()/self.ratio <= rect['point_end'].x():
-                if rect['point'].y() <= point.y()/self.ratio <= rect['point_end'].y():
+            if rect['point'].x() <= point.x() / self.ratio <= rect['point_end'].x():
+                if rect['point'].y() <= point.y() / self.ratio <= rect['point_end'].y():
                     return True
         return False
 

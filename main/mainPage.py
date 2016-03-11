@@ -6,7 +6,7 @@ Created on 2016/1/13
 """
 from __future__ import division
 from Adb import AdbDevice
-from autoSense import AutoSenseItem, PlayItem, TestPlanItem, \
+from autoSense import AutoSenseItem, PlayItem, TestPlanItem, TestResultItem, \
     INDEX, ACTION, PARAMETER, DESCRIPTION, INFORMATION
 from Executor import workExecutor
 from DeviceManager import Manager
@@ -14,8 +14,8 @@ from PySide import QtCore, QtGui
 from GuiTemplate import MainTitleButton, IconButton, IconWithWordsButton, PushButton, TestPlanListView, MyLabel, \
     BottomLineWidget, HContainer, VContainer, TestPlanListItem, MyPlainTextEdit, MyProcessingBar, IntroWindow, \
     PictureLabel, ActionListView, DelayDialog, MediaCheckDialog, MyCheckBox, MyLineEdit, ListWidgetWithLine, \
-    InfoListWidget, TitleButton, SearchBox, SettingIconButton, PlayQueueListView, PlayQueueListItem, ActionListItem,\
-    MyProgressBar, MenuButton, MyButton
+    InfoListWidget, TitleButton, SearchBox, SettingIconButton, PlayQueueListView, PlayQueueListItem, ActionListItem, \
+    MyProgressBar, MenuButton, MyButton, DonutPie
 from constants import NFC, WIFI, AIRPLANE, GPS, AUTO_ROTATE, BLUETOOTH, DATA_ROAMING, ALLOW_APP, NO_KEEP_ACTIVITY, \
     AUTO_BRIGHTNESS, BRIGHTNESS_SET, VIBRATE, WINDOW_ANIMATOR, TRANSITION_ANIMATOR, DURATION_ANIMATION, \
     KEEP_WIFI, ICON_FOLDER, ROOT_FOLDER, FONT_FOLDER, LOG_FOLDER, SCRIPT_FOLDER, PRIVATE_FOLDER, \
@@ -31,9 +31,16 @@ import json
 import socket
 import directory as folder
 import subprocess
+import autoSense
 import uiautomator
 import threading
 from subprocess import CalledProcessError
+
+
+PLAY_LIST_PAGE = 0
+PROCESS_PAGE = 1
+SEMI_CHECK_PAGE = 2
+REPORT_PAGE = 3
 
 
 def set_background_color(widget, color):
@@ -54,7 +61,7 @@ class RunScript(QtCore.QThread):
     """
     Handle the reproduced actions and send back to device
     """
-    actionResult = False
+    actionResult = autoSense.FAIL
     isStopRun = False
     finish = QtCore.Signal()
     currentAction = QtCore.Signal(AutoSenseItem)
@@ -72,7 +79,7 @@ class RunScript(QtCore.QThread):
             'Home': self.actionHome,
             'Swipe': self.actionSwipe,
             'Drag': self.actionDrag,
-            'LongClick':self.actionLongClick,
+            'LongClick': self.actionLongClick,
             'Delay': self.actionDelay,
             'Menu': self.actionMenu,
             'Exist': self.actionCheckExist,
@@ -81,7 +88,8 @@ class RunScript(QtCore.QThread):
             'RelativeCheck': self.actionRelativeCheck,
             'Type': self.actionType,
             'MediaCheck': self.actionMediaCheck,
-            'HideKeyboard': self.actionHideKeyboard}
+            'HideKeyboard': self.actionHideKeyboard,
+            'CheckPoint': self.actionCheckPoint}
 
     def setTimes(self, times):
         """
@@ -103,6 +111,9 @@ class RunScript(QtCore.QThread):
         :param device: AdbDevice
         """
         self._device = device
+
+    def setPlayName(self, name):
+        self.playName = name
 
     def checkMedia(self, passTime, timeout, isHold):
         decryptRE = re.compile('[lL]ast\s+write\s+occurred\s+\(msecs\):\s+(?P<last_write>\d+)')
@@ -126,7 +137,7 @@ class RunScript(QtCore.QThread):
                             isAlreadyPass = True
                             timeout = 2
                         else:
-                            return {'result': True, 'reason':''}
+                            return {'result': True, 'reason': ''}
                 else:
                     work = current_sec_time()
                     idleTime = current_sec_time() - idle
@@ -142,15 +153,17 @@ class RunScript(QtCore.QThread):
             time.sleep(0.1)
 
     def actionMediaCheck(self, param, refer=None):
-        print 'param = '+str(param)
         t, timeout, isHold = param
         result = self.checkMedia(int(t), int(timeout), isHold)
         if result is not None:
             if result['result']:
-                self.actionResult = True
+                self.actionResult = autoSense.PASS
 
     def actionRelativeCheck(self, param, refer=None):
         pass
+
+    def actionCheckPoint(self, param, refer=None):
+        self.actionResult = autoSense.SEMI
 
     def actionType(self, param, refer=None):
         """
@@ -159,7 +172,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.type(param[0])
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionDelay(self, param, refer=None):
         """
@@ -183,7 +196,7 @@ class RunScript(QtCore.QThread):
                         self._device.unlock()
                 del container[:]
             time.sleep(1)
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionUnlock(self, param, refer=None):
         """
@@ -192,7 +205,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.unlock()
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionMenu(self, param, refer=None):
         """
@@ -201,7 +214,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.cmd.inputKeyevnt('MENU')
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionPower(self, param, refer=None):
         """
@@ -210,7 +223,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.cmd.inputKeyevnt('POWER')
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionHome(self, param, refer=None):
         """
@@ -219,7 +232,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.cmd.inputKeyevnt('HOME')
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionLongClick(self, param, refer=None):
         """
@@ -229,9 +242,9 @@ class RunScript(QtCore.QThread):
         """
         info = json.loads(refer)
         x, y, duration = param
-        point = (int(x),int(y))
+        point = (int(x), int(y))
         self._device.longClick(point[0], point[1], int(duration))
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionDrag(self, param, refer=None):
         """
@@ -242,6 +255,7 @@ class RunScript(QtCore.QThread):
         start = (param[0], param[1])
         end = (param[2], param[3])
         self._device.drag(start, end, int(param[4]))
+        self.actionResult = autoSense.PASS
 
     def actionSwipe(self, param, refer=None):
         """
@@ -253,7 +267,7 @@ class RunScript(QtCore.QThread):
         end = (param[2], param[3])
         # ensure page flow
         self._device.swipe(start, end, int(param[4]))
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionBack(self, param, refer=None):
         """
@@ -262,7 +276,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.backBtn()
-        self.actionResult = True
+        self.actionResult = autoSense.PASS
 
     def actionClick(self, param, refer=None):
         """
@@ -286,9 +300,8 @@ class RunScript(QtCore.QThread):
                     if self._device.isLocked():
                         self._device.unlock()
                 result = self._device.checkSamePoint(point, info)
-                print result['reason']
                 if result['answer']:
-                    self.actionResult = True
+                    self.actionResult = autoSense.PASS
                     break
                 elif not noShow:
                     print 'wait view'
@@ -310,33 +323,33 @@ class RunScript(QtCore.QThread):
             selector = self._device.retrieveSelector(point, self._device.d(text=value))
             if selector:
                 if selector.childCount == 0:
-                    self.actionResult = True
+                    self.actionResult = autoSense.PASS
             else:
-                self.actionResult = True
+                self.actionResult = autoSense.PASS
 
         elif attribute == 'description':
             selector = self._device.retrieveSelector(point, self._device.d(description=value))
             if selector:
                 if selector.childCount == 0:
-                    self.actionResult = True
+                    self.actionResult = autoSense.PASS
             else:
-                self.actionResult = True
+                self.actionResult = autoSense.PASS
 
         elif attribute == 'resourceId':
             selector = self._device.retrieveSelector(point, self._device.d(resourceId=value))
             if selector:
                 if selector.childCount == 0:
-                    self.actionResult = True
+                    self.actionResult = autoSense.PASS
             else:
-                self.actionResult = True
+                self.actionResult = autoSense.PASS
 
         elif attribute == 'className':
             selector = self._device.retrieveSelector(point, self._device.d(className=value))
             if selector:
                 if selector.childCount == 0:
-                    self.actionResult = True
+                    self.actionResult = autoSense.PASS
             else:
-                self.actionResult = True
+                self.actionResult = autoSense.PASS
 
     def actionCheckExist(self, param, refer=None):
         """
@@ -349,7 +362,7 @@ class RunScript(QtCore.QThread):
         point = (int(x), int(y))
         if attribute == 'text':
             if self._device.retrieveSelector(point, self._device.d(text=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -357,7 +370,7 @@ class RunScript(QtCore.QThread):
                 # self.isStopRun = True
         elif attribute == 'description':
             if self._device.retrieveSelector(point, self._device.d(description=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -365,7 +378,7 @@ class RunScript(QtCore.QThread):
                 # self.isStopRun = True
         elif attribute == 'resourceId':
             if self._device.retrieveSelector(point, self._device.d(resourceId=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -373,7 +386,7 @@ class RunScript(QtCore.QThread):
                 # self.isStopRun = True
         elif attribute == 'className':
             if self._device.retrieveSelector(point, self._device.d(className=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -391,19 +404,19 @@ class RunScript(QtCore.QThread):
         point = (int(x), int(y))
         if attribute == 'text':
             if not self._device.retrieveSelector(point, self._device.d(text=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
 
         elif attribute == 'description':
             if not self._device.retrieveSelector(point, self._device.d(description=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
 
         elif attribute == 'resourceId':
             if not self._device.retrieveSelector(point, self._device.d(resourceId=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
 
         elif attribute == 'className':
             if not self._device.retrieveSelector(point, self._device.d(className=value)):
-                self.actionResult = True
+                self.actionResult = self.PASS
 
     def actionHideKeyboard(self, param, refer=None):
         """
@@ -412,7 +425,7 @@ class RunScript(QtCore.QThread):
         :param refer: None
         """
         self._device.hideKeyboard()
-        self.actionResult = True
+        self.actionResult = self.PASS
 
     def stop(self):
         """
@@ -431,6 +444,7 @@ class RunScript(QtCore.QThread):
         self.isStopRun = False
         self.limit = 0
         try:
+            self._device.takeSnapshot(IMAGE_FOLDER + '/%s_%d.png' % (self.playName, 0))
             while self.limit < self.times and not self.isStopRun:
                 self.limit += 1
                 for index in range(len(self.actions)):
@@ -438,14 +452,15 @@ class RunScript(QtCore.QThread):
                         self.index = index + 1
                         item = self.actions[index]
                         if self._device.isConnected():
-                            self.actionResult = False
+                            self.actionResult = autoSense.FAIL
                             self.currentAction.emit(item)
                             self.actionSwitcher.get(item.action())(item.parameter(), item.information())
+                            self._device.takeSnapshot(IMAGE_FOLDER + '/%s_%d.png' % (self.playName, self.index))
                             self.actionDone.emit(item, self.actionResult, index)
                         else:
                             self.isStopRun = True
                             break
-                        time.sleep(1)
+
         except socket.error:
             print 'socket.error: device offline'
             self.isStopRun = True
@@ -915,6 +930,7 @@ class CreateNewPage(IntroWindow):
     """
     This is a creating testplan page, user can input name and description.
     """
+
     def __init__(self):
         super(CreateNewPage, self).__init__()
         self.nameLabel = QtGui.QLabel('Testplan name')
@@ -1878,10 +1894,6 @@ class MainPage(QtGui.QWidget):
     pageList = list()
     _device = None
     updateScreen = None
-    PLAY_LIST_PAGE = 0
-    PROCESS_PAGE = 1
-    SEMI_CHECK_PAGE = 2
-    REPORT_PAGE = 3
 
     def __init__(self, serialNo):
         super(MainPage, self).__init__()
@@ -1897,7 +1909,7 @@ class MainPage(QtGui.QWidget):
         self.downsideContent()
         self.createMenus()
         self.initUi()
-        self.switchPages(self.PLAY_LIST_PAGE)
+        self.switchPages(PLAY_LIST_PAGE)
 
     def initUi(self):
         mainLayout = QtGui.QVBoxLayout()
@@ -1930,7 +1942,7 @@ class MainPage(QtGui.QWidget):
         self.playListBtn.pressed.connect(self.switchPlayListPage)
         self.processBtn.pressed.connect(self.switchProcessPage)
         self.semiCheckBtn.pressed.connect(self.switchSemiCheckPage)
-        # self.reportBtn.pressed.connect(self.switchPage)
+        self.reportBtn.pressed.connect(self.switchReportPage)
         self.pageList.append(self.playListBtn)
         self.pageList.append(self.processBtn)
         self.pageList.append(self.semiCheckBtn)
@@ -1984,39 +1996,37 @@ class MainPage(QtGui.QWidget):
 
         self.scriptConvertAction = toolMenu.addAction('Script conversion')
 
-        # self.openAction.triggered.connect(self.widget.openScript)
-        # self.saveAction.triggered.connect(self.widget.saveScript)
-        # self.deleteAction.triggered.connect(self.widget.itemDelete)
-        # self.clearAction.triggered.connect(self.widget.clear)
-        # self.selectAction.triggered.connect(lambda: self.widget.selectAllItems(True))
-        # self.deselectAction.triggered.connect(lambda: self.widget.selectAllItems(False))
-        # self.deviceInfoAtion.triggered.connect(self.widget.showDeviceInfo)
-        # self.scriptConvertAction.triggered.connect(self.widget.showScriptConvertion)
-        # self.turnOffAnimation.triggered.connect(self.widget.turnOffAnimation)
-        # self.installAction.triggered.connect(self.widget.install)
-        # self.uninstallAction.triggered.connect(self.widget.uninstall)
 
     def switchPlayListPage(self):
-        self.enablePage(self.PLAY_LIST_PAGE)
+        self.enablePage(PLAY_LIST_PAGE)
         if self.updateScreen:
             self.updateScreen.start()
-        self.playPage.switchMode(self.PLAY_LIST_PAGE)
+        self.playPage.switch_mode(PLAY_LIST_PAGE)
 
     def switchProcessPage(self):
         self.updateScreen.stop()
-        self.enablePage(self.PROCESS_PAGE)
-        self.playPage.switchMode(self.PROCESS_PAGE)
+        self.enablePage(PROCESS_PAGE)
+        self.playPage.switch_mode(PROCESS_PAGE)
 
     def switchSemiCheckPage(self):
         self.updateScreen.stop()
-        self.enablePage(self.SEMI_CHECK_PAGE)
-        self.playPage.switchMode(self.SEMI_CHECK_PAGE)
+        self.enablePage(SEMI_CHECK_PAGE)
+        self.playPage.switch_mode(SEMI_CHECK_PAGE)
+
+    def switchReportPage(self):
+        self.updateScreen.stop()
+        self.enablePage(REPORT_PAGE)
+        self.playPage.switch_mode(REPORT_PAGE)
 
     def switchPages(self, num):
-        if num==self.PLAY_LIST_PAGE:
+        if num == PLAY_LIST_PAGE:
             self.switchPlayListPage()
-        elif num == self.PROCESS_PAGE:
+        elif num == PROCESS_PAGE:
             self.switchProcessPage()
+        elif num == SEMI_CHECK_PAGE:
+            self.switchSemiCheckPage()
+        elif num == REPORT_PAGE:
+            self.switchReportPage()
 
     def currentPage(self):
         return self.downsideWidget.currentIndex()
@@ -2034,7 +2044,7 @@ class MainPage(QtGui.QWidget):
     @QtCore.Slot()
     def loadDone(self):
         if self.updateScreen.isRunning():
-            self.playPage.setScreenContent()
+            self.playPage.notifySetScreenContent()
 
     @QtCore.Slot()
     def deviceOffline(self):
@@ -2069,13 +2079,15 @@ class PlayListPage(VContainer):
     buttonList = list()
     planDict = dict()
     playQueueDict = dict()
-    playQueueList = list()
+    runQueueList = list()
+    resultPool = list()
     notifyPages = QtCore.Signal(int)
     isRunning = False
-    VIRTUAL_PAGE = 0
-    PROCESSING_PAGE = 2
-    DISCONNECT_PAGE = 1
-    SEMICHECK_PAGE = 3
+    RIGHT_VIRTUAL_PAGE = 0
+    RIGHT_PROCESSING_PAGE = 2
+    RIGHT_DISCONNECT_PAGE = 1
+    RIGHT_SEMICHECK_PAGE = 3
+    RIGHT_REPORT_PAGE = 4
 
     currentPage = 0
 
@@ -2083,11 +2095,11 @@ class PlayListPage(VContainer):
         super(PlayListPage, self).__init__()
         self._device = device
         self.picPath = PRIVATE_FOLDER + '/' + str(self._device.serialno) + '_screen.png'
-        self.initActionBar()
-        self.initTestPlanField()
-        self.initRightSideField()
-        self.initDownSide()
-        self.enableButtons(False)
+        self.init_action_bar()
+        self.init_left_frame()
+        self.init_right_frame()
+        self.combine_frames()
+        self.enable_buttons(False)
         self.setSpacing(1)
         self.addWidget(self.actionBar)
         self.addWidget(self.combineWidget)
@@ -2095,41 +2107,9 @@ class PlayListPage(VContainer):
         self.rsThread = RunScript(device=self._device)
         self.rsThread.currentAction.connect(self.onCurrentAction)
         self.rsThread.actionDone.connect(self.onActionDone)
-        self.rsThread.finish.connect(self.runDone)
+        self.rsThread.finish.connect(self.run_done)
 
-    def onCurrentAction(self, item):
-        self.actionListView.setCurrentRow(int(item.index())-1)
-
-    def onActionDone(self, item, result, index):
-        print 'index = '+str(index)
-        currentItem = self.actionListView.item(index)
-        currentWidgetItem = self.actionListView.itemWidget(currentItem)
-
-        if result:
-            currentWidgetItem.setTested(1)
-            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_passed.png'))
-        else:
-            currentWidgetItem.setTested(2)
-            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_failed.png'))
-
-        self.progressBar.setValue(self.progressBar.value()+1)
-        calculate = self.progressBar.value()/self.progressBar.maximum()
-        self.percentage.setText(str((int(calculate*100)))+'%')
-
-    def runDone(self):
-        print len(self.playQueueList)
-        if len(self.playQueueList) > 1:
-            self.playQueueList.pop()
-            self.playQueueListView.setCurrentItem(self.playQueueListView.itemByItemWidget(self.playQueueList[-1]))
-            self.runScript(self.playQueueList[-1])
-        else:
-            self.switchBtns.setCurrentIndex(0)
-            self.actionListView.setCurrentRow(-1)
-            self.isRunning = False
-            self.processGif.stop()
-            self.playQueueListView.setEnabled(True)
-
-    def initActionBar(self):
+    def init_action_bar(self):
         backBtn = IconButton()
         homeBtn = IconButton()
         menuBtn = IconButton()
@@ -2219,10 +2199,11 @@ class PlayListPage(VContainer):
         checkMenu = QtGui.QMenu()
         checkMenu.setStyleSheet('QMenu{background-color: #282828; color: #A0A0A0}'
                                 'QMenu::item:selected {background-color: #383838;}')
-        checkMenu.addAction('UI exist', lambda check_type=IS_EXIST: self.checkUI(check_type))
-        checkMenu.addAction('UI not exist', lambda check_type=NO_EXIST: self.checkUI(check_type))
-        checkMenu.addAction('UI is blank', lambda check_type=IS_BLANK: self.checkUI(check_type))
-        checkMenu.addAction('UI relative is exist', lambda check_type=IS_RELATIVE_EXIST: self.checkUI(check_type))
+        checkMenu.addAction('UI exist', lambda check_type=IS_EXIST: self.notify_Check_UI(check_type))
+        checkMenu.addAction('UI not exist', lambda check_type=NO_EXIST: self.notify_Check_UI(check_type))
+        checkMenu.addAction('UI is blank', lambda check_type=IS_BLANK: self.notify_Check_UI(check_type))
+        checkMenu.addAction('UI relative is exist', lambda check_type=IS_RELATIVE_EXIST: self.notify_Check_UI(check_type))
+        checkMenu.addAction('Check point', self.addCheckPoint)
         checkUiBtn.setMenu(checkMenu)
 
         checkUiWidget = HContainer()
@@ -2275,47 +2256,39 @@ class PlayListPage(VContainer):
         previousBtn = MenuButton('Back', font_size=12, text_color='#A0A0A0')
         previousBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
         previousBtn.setIgnoreMouse(True)
-        previousBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER+'/ic_previous normal.png'))
-        previousBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER+'/ic_previous not active.png'))
+        previousBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_previous normal.png'))
+        previousBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_previous not active.png'))
         previousBtn.setFixedSize(120, 40)
-        previousBtn.clicked.connect(self.abortProcess)
-
-        nextBtn = MenuButton('Next', font_size=12, text_color='#A0A0A0')
-        nextBtn.setMenuIndicator(ICON_FOLDER+'/ic_next normal.png',
-                                 ICON_FOLDER+'/ic_next not active.png')
-        nextBtn.setEnabled(False)
-        nextBtn.setMenu(QtGui.QMenu())
-        nextBtn.setFixedSize(120, 40)
+        previousBtn.clicked.connect(self.abort_process)
 
         cancelBtn = MyButton('CANCEL', font_size=10, font_color='#A0A0A0')
         cancelBtn.setFixedSize(80, 24)
         saveBtn = MyButton('SAVE', font_size=10, font_color='#A0A0A0')
         saveBtn.setFixedSize(80, 24)
 
-        saveSemiField = HContainer()
-        saveSemiField.setSpacing(10)
-        saveSemiField.addWidget(cancelBtn)
-        saveSemiField.addWidget(saveBtn)
+        self.saveSemiField = HContainer()
+        self.saveSemiField.setSpacing(10)
+        self.saveSemiField.addWidget(cancelBtn)
+        self.saveSemiField.addWidget(saveBtn)
 
-        switchPageBar = HContainer()
-        switchPageBar.addWidget(previousBtn)
-        switchPageBar.addWidget(nextBtn)
-        switchPageBar.addStretch(1)
-        switchPageBar.addWidget(saveSemiField)
-        set_background_color(switchPageBar, '#282828')
+        jumpBar = HContainer()
+        jumpBar.addWidget(previousBtn)
+        jumpBar.addStretch(1)
+        jumpBar.addWidget(self.saveSemiField)
+        set_background_color(jumpBar, '#282828')
 
         self.actionBar = QtGui.QStackedWidget()
         self.actionBar.addWidget(self.actionMenuBar)
-        self.actionBar.addWidget(switchPageBar)
+        self.actionBar.addWidget(jumpBar)
         self.actionBar.setFixedHeight(40)
 
-    def initTestPlanField(self):
+    def init_left_frame(self):
         # Test plan title filed
-        testPlanBtn = MainTitleButton('TestPlan', text_color='#FFFFFF', rect_color='#282828')
+        testPlanBtn = MainTitleButton('Test plan', text_color='#FFFFFF', rect_color='#282828')
         playQueueBtn = MainTitleButton('Play queue', text_color='#FFFFFF', rect_color='#282828')
 
-        testPlanBtn.pressed.connect(lambda page=0: self.switchPlanAndQueue(page))
-        playQueueBtn.pressed.connect(lambda page=1: self.switchPlanAndQueue(page))
+        testPlanBtn.pressed.connect(lambda page=0: self.switch_left_frame(page))
+        playQueueBtn.pressed.connect(lambda page=1: self.switch_left_frame(page))
         self.titleList = [testPlanBtn, playQueueBtn]
 
         testPlanTitleWidget = HContainer()
@@ -2326,7 +2299,7 @@ class PlayListPage(VContainer):
         # test plan page
         self.addPlanBtn = PushButton('Add new testplan', font_size=12, text_color='#FFFFFF', rect_color='#282828')
         self.addPlanBtn.setFixedHeight(30)
-        self.addPlanBtn.clicked.connect(self.addTestPlanBtn)
+        self.addPlanBtn.clicked.connect(self.add_test_plan_btn)
         appPlanWidget = HContainer()
         appPlanWidget.addWidget(self.addPlanBtn)
         appPlanWidget.setAutoFitHeight()
@@ -2351,7 +2324,7 @@ class PlayListPage(VContainer):
         self.startBtn = PushButton(text='PLAY', font_size=14, text_color='#A0A0A0', rect_color='#282828')
         self.startBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_play normal.png'))
         self.startBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_play press.png'))
-        self.startBtn.clicked.connect(self.readyScript)
+        self.startBtn.clicked.connect(self.ready_script)
         self.startBtn.setFixedHeight(40)
 
         self.stopBtn = PushButton(text='STOP', font_size=14, text_color='#A0A0A0', rect_color='#282828')
@@ -2416,7 +2389,7 @@ class PlayListPage(VContainer):
         actionTitle.setAutoFitHeight()
 
         self.actionListView = ActionListView(active_color='#282828')
-        self.actionListView.itemClicked.connect(self.actionSelected)
+        self.actionListView.currentItemChanged.connect(self.actionSelected)
         self.actionListView.takeItemsDone.connect(self.actionItemDeleted)
 
         self.descriptionEdit = MyPlainTextEdit(font_size=12, font_color='#FFFFFF')
@@ -2434,7 +2407,8 @@ class PlayListPage(VContainer):
 
         self.findTestPlan()
 
-    def initRightSideField(self):
+    def init_right_frame(self):
+
         # Virtual screen page
         self.virtualScreen = PictureLabel(self, currentPath=self.picPath)
         self.virtualScreen.setAlignment(QtCore.Qt.AlignCenter)
@@ -2474,7 +2448,7 @@ class PlayListPage(VContainer):
 
         # process page
         processLabel = QtGui.QLabel()
-        self.processGif = QtGui.QMovie(ICON_FOLDER+'/gif_processing.gif')
+        self.processGif = QtGui.QMovie(ICON_FOLDER + '/gif_processing.gif')
         processLabel.setFixedHeight(128)
 
         processLabel.setMovie(self.processGif)
@@ -2499,20 +2473,26 @@ class PlayListPage(VContainer):
         processView.addWidget(processContainer)
 
         # semi-check page
-        checkPointDescription = MyLabel('Checkpoint:', font_size=14, color='#FFFFFF')
+        checkPointTitle = MyLabel('Checkpoint : ', font_size=14, color='#FFFFFF')
+        self.checkPointDescription = MyLabel('Checkpoint:', font_size=14, color='#FFFFFF')
+        checkCombo = HContainer()
+        checkCombo.addWidget(checkPointTitle)
+        checkCombo.addWidget(self.checkPointDescription)
 
         passBtn = IconButton()
         passBtn.setIconSize(QtCore.QSize(64, 24))
         passBtn.setIgnoreMouse(True)
         passBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-        passBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER+'/btn_pass_normal.png'))
-        passBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER+'/btn_pass_press.png'))
+        passBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/btn_pass_normal.png'))
+        passBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/btn_pass_press.png'))
+        passBtn.clicked.connect(lambda: self.semi_result_clicked(autoSense.PASS))
         failBtn = IconButton()
         failBtn.setIconSize(QtCore.QSize(64, 24))
         failBtn.setIgnoreMouse(True)
         failBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-        failBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER+'/btn_fail_normal.png'))
-        failBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER+'/btn_fail_press.png'))
+        failBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/btn_fail_normal.png'))
+        failBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/btn_fail_press.png'))
+        failBtn.clicked.connect(lambda: self.semi_result_clicked(autoSense.FAIL))
         judgeField = HContainer()
         judgeField.addWidget(passBtn)
         judgeField.addWidget(failBtn)
@@ -2520,7 +2500,7 @@ class PlayListPage(VContainer):
 
         topField = HContainer()
         topField.setFixedHeight(40)
-        topField.addWidget(checkPointDescription)
+        topField.addWidget(checkCombo)
         topField.addStretch(1)
         topField.addWidget(judgeField)
 
@@ -2533,64 +2513,146 @@ class PlayListPage(VContainer):
                              'some events will be reported before the maximum reporting latency has elapsed.')
         logView.setFixedSize(662, 262)
 
-        postActionLabel = MyLabel('POST action screenshot', font_size=12, color='#A4A4A4')
-        postActionLabel.setFixedHeight(40)
+        beforeActionLabel = MyLabel('BEFORE action screenshot', font_size=12, color='#A4A4A4')
+        beforeActionLabel.setFixedHeight(40)
+        beforeActionLabel.setContentsMargins(10, 0, 0, 0)
+        set_background_color(beforeActionLabel, '#282828')
         afterActionLabel = MyLabel('AFTER action screenshot', font_size=12, color='#A4A4A4')
         afterActionLabel.setFixedHeight(40)
+        afterActionLabel.setContentsMargins(10, 0, 0, 0)
+        set_background_color(afterActionLabel, '#282828')
 
-        postPixLabel = QtGui.QLabel()
-        postPixLabel.setAlignment(QtCore.Qt.AlignCenter)
-        afterPixLabel = QtGui.QLabel()
-        afterPixLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.beforePixLabel = QtGui.QLabel()
+        self.beforePixLabel.setAlignment(QtCore.Qt.AlignCenter)
+        set_background_color(self.beforePixLabel, '#282828')
+        self.afterPixLabel = QtGui.QLabel()
+        self.afterPixLabel.setAlignment(QtCore.Qt.AlignCenter)
+        set_background_color(self.afterPixLabel, '#282828')
 
-        postPixmap = QtGui.QPixmap(self.picPath)
-        postPixmap = postPixmap.scaled(200, 200,aspectMode=QtCore.Qt.KeepAspectRatio)
-        afterPixmap = QtGui.QPixmap(self.picPath)
-        afterPixmap = afterPixmap.scaled(200, 200, aspectMode=QtCore.Qt.KeepAspectRatio)
+        self.leftScreenShotField = VContainer()
+        self.leftScreenShotField.setSpacing(1)
+        self.leftScreenShotField.addWidget(beforeActionLabel)
+        self.leftScreenShotField.addWidget(self.beforePixLabel)
 
-        postPixLabel.setPixmap(postPixmap)
-        afterPixLabel.setPixmap(afterPixmap)
-
-        leftScreenShotField = VContainer()
-        leftScreenShotField.setContentsMargins(10, 0, 0, 0)
-        leftScreenShotField.addWidget(postActionLabel)
-        leftScreenShotField.addWidget(postPixLabel)
-        set_background_color(leftScreenShotField, '#282828')
-        rightScreenShotField = VContainer()
-        rightScreenShotField.setContentsMargins(10, 0, 0, 0)
-        rightScreenShotField.addWidget(afterActionLabel)
-        rightScreenShotField.addWidget((afterPixLabel))
-        set_background_color(rightScreenShotField, '#282828')
+        self.rightScreenShotField = VContainer()
+        self.rightScreenShotField.setSpacing(1)
+        self.rightScreenShotField.addWidget(afterActionLabel)
+        self.rightScreenShotField.addWidget(self.afterPixLabel)
 
         screenShotField = HContainer()
         screenShotField.setSpacing(8)
         screenShotField.setContentsMargins(0, 10, 0, 0)
-        screenShotField.addWidget(leftScreenShotField)
-        screenShotField.addWidget(rightScreenShotField)
+        screenShotField.addWidget(self.leftScreenShotField)
+        screenShotField.addWidget(self.rightScreenShotField)
 
-        rightSideWidget = VContainer()
-        rightSideWidget.setContentsMargins(10, 10, 10, 10)
-        rightSideWidget.addWidget(topField)
-        rightSideWidget.addWidget(logView)
-        rightSideWidget.addWidget(screenShotField)
+        semiCheckView = VContainer()
+        semiCheckView.setContentsMargins(10, 10, 10, 10)
+        semiCheckView.addWidget(topField)
+        semiCheckView.addWidget(logView)
+        semiCheckView.addWidget(screenShotField)
+
+        # report page
+        totalField = VContainer()
+        totalLabel = MyLabel('Total Action', font_size=12, color='#A0A0A0')
+        totalLabel.setAlignment(QtCore.Qt.AlignCenter)
+        totalLabel.setBoader('#404040')
+        self.totalCountLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.totalCountLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.totalCountLabel.setBoader('#404040')
+        totalField.addWidget(totalLabel)
+        totalField.addWidget(self.totalCountLabel)
+
+        passField = VContainer()
+        passLabel = MyLabel('Passed', font_size=12, color='#A0A0A0')
+        passLabel.setAlignment(QtCore.Qt.AlignCenter)
+        passLabel.setBoader('#404040')
+        self.passCountLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.passCountLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.passCountLabel.setBoader('#404040')
+        passField.addWidget(passLabel)
+        passField.addWidget(self.passCountLabel)
+
+        failField = VContainer()
+        failLabel = MyLabel('Failed', font_size=12, color='#A0A0A0')
+        failLabel.setAlignment(QtCore.Qt.AlignCenter)
+        failLabel.setBoader('#404040')
+        self.failCountLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.failCountLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.failCountLabel.setBoader('#404040')
+        failField.addWidget(failLabel)
+        failField.addWidget(self.failCountLabel)
+
+        passRatioField = VContainer()
+        passRatioLabel = MyLabel('Pass Ratio', font_size=12, color='#A0A0A0')
+        passRatioLabel.setAlignment(QtCore.Qt.AlignCenter)
+        passRatioLabel.setBoader('#404040')
+        self.passRatioValueLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.passRatioValueLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.passRatioValueLabel.setBoader('#404040')
+        passRatioField.addWidget(passRatioLabel)
+        passRatioField.addWidget(self.passRatioValueLabel)
+
+        failRatioField = VContainer()
+        failRatioLabel = MyLabel('Fail Ratio', font_size=12, color='#A0A0A0')
+        failRatioLabel.setAlignment(QtCore.Qt.AlignCenter)
+        failRatioLabel.setBoader('#404040')
+        self.failRatioValueLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.failRatioValueLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.failRatioValueLabel.setBoader('#404040')
+        failRatioField.addWidget(failRatioLabel)
+        failRatioField.addWidget(self.failRatioValueLabel)
+
+        semiRatioField = VContainer()
+        semiRatioLabel = MyLabel('Semi Ratio', font_size=12, color='#A0A0A0')
+        semiRatioLabel.setAlignment(QtCore.Qt.AlignCenter)
+        semiRatioLabel.setBoader('#404040')
+        self.semiRatioValueLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.semiRatioValueLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.semiRatioValueLabel.setBoader('#404040')
+        semiRatioField.addWidget(semiRatioLabel)
+        semiRatioField.addWidget(self.semiRatioValueLabel)
+
+        emptyField = VContainer()
+        emptyLabel = MyLabel('')
+        emptyLabel.setBoader('#404040')
+        emptyValueLabel = MyLabel('')
+        emptyValueLabel.setBoader('#404040')
+        emptyField.addWidget(emptyLabel)
+        emptyField.addWidget(emptyValueLabel)
+
+        formView = HContainer()
+        formView.addWidget(totalField)
+        formView.addWidget(passField)
+        formView.addWidget(failField)
+        formView.addWidget(passRatioField)
+        formView.addWidget(failRatioField)
+        formView.addWidget(semiRatioField)
+        formView.addWidget(emptyField)
+        formView.setFixedHeight(60)
+
+        drawerView = VContainer()
+        self.pass_fail_pie = DonutPie(radius=100, thickness=20, color='#7ED321', second_color='#DA4456')
+        self.pass_fail_pie.setMinimumHeight(290)
+        self.semi_total_pie = DonutPie(radius=100, thickness=20, color='#F5A623', second_color='#4A4A4A')
+        self.semi_total_pie.setMinimumHeight(290)
+
+        drawerView.addWidget(self.pass_fail_pie)
+        drawerView.addWidget(self.semi_total_pie)
+
+        reportView = VContainer()
+        reportView.setContentsMargins(10, 10, 10, 10)
+        reportView.addWidget(formView)
+        reportView.addWidget(drawerView)
+        reportView.addStretch(1)
 
         self.aboutDeviceWidget = QtGui.QStackedWidget()
         self.aboutDeviceWidget.addWidget(self.virtualWidget)
         self.aboutDeviceWidget.addWidget(disconnectView)
         self.aboutDeviceWidget.addWidget(processView)
-        self.aboutDeviceWidget.addWidget(rightSideWidget)
+        self.aboutDeviceWidget.addWidget(semiCheckView)
+        self.aboutDeviceWidget.addWidget(reportView)
 
-    def offListRightClick(self, needOff):
-        if needOff:
-            self.testPlanListView.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
-            self.playQueueListView.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
-            self.actionListView.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
-        else:
-            self.testPlanListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self.playQueueListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            self.actionListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-
-    def initDownSide(self):
+    def combine_frames(self):
         line = QtGui.QFrame()
         line.setFrameShape(QtGui.QFrame.VLine)
         line.setStyleSheet('color: #404040;')
@@ -2601,15 +2663,109 @@ class PlayListPage(VContainer):
         self.combineWidget.addWidget(line)
         self.combineWidget.addWidget(self.aboutDeviceWidget)
 
-    def abortProcess(self):
+    def switch_mode(self, mode):
+        """
+        This switches pages include: PLAY_LIST_PAGE, PROCESS_PAGE, SEMI_CHECK_PAGE, REPORT_PAGE
+        :param mode: page number
+        :return: None
+        """
+        if mode == PLAY_LIST_PAGE:
+            self.currentPage = PLAY_LIST_PAGE
+            self.switch_left_frame(0)
+            self.switch_right_frame(self.RIGHT_VIRTUAL_PAGE)
+            self.switch_action_bar(0)
+            self.off_list_right_click(False)
+
+        elif mode == PROCESS_PAGE:
+            self.currentPage = PROCESS_PAGE
+            self.switch_right_frame(self.RIGHT_PROCESSING_PAGE)
+            self.switch_action_bar(1)
+            self.off_list_right_click(True)
+
+        elif mode == SEMI_CHECK_PAGE:
+            self.currentPage = SEMI_CHECK_PAGE
+            self.switch_left_frame(1)
+            self.switch_right_frame(self.RIGHT_SEMICHECK_PAGE)
+            self.switch_action_bar(1)
+            self.off_list_right_click(True)
+            self.select_check_point_action()
+
+        elif mode == REPORT_PAGE:
+            self.currentPage = REPORT_PAGE
+            self.switch_left_frame(1)
+            self.switch_action_bar(1)
+            self.off_list_right_click(True)
+            self.switch_right_frame(self.RIGHT_REPORT_PAGE)
+
+    def switch_left_frame(self, number):
+        """
+        This switches Testplan and Playqueue
+        :param number: page number
+        :return: None
+        """
+        self.actionListView.clear()
+        self.planNameLabel.setText('')
+        self.createTime.setText('')
+        if number == 0:
+            self.titleList[0].setEnabled(False)
+            self.titleList[1].setEnabled(True)
+            self.sideStack.setCurrentIndex(0)
+            self.testPlanListView.setCurrentRow(-1)
+            if self.testPlanListView.count() != 0:
+                self.testPlanListView.setCurrentRow(0)
+        else:
+            self.titleList[0].setEnabled(True)
+            self.titleList[1].setEnabled(False)
+            self.sideStack.setCurrentIndex(1)
+            self.playQueueListView.setCurrentRow(-1)
+            if self.playQueueListView.count() != 0:
+                self.playQueueListView.setCurrentRow(0)
+
+    def switch_right_frame(self, number):
+        self.aboutDeviceWidget.setCurrentIndex(number)
+        if number == self.RIGHT_VIRTUAL_PAGE:
+            self.enable_buttons(True)
+        elif number == self.RIGHT_DISCONNECT_PAGE:
+            self.enable_buttons(False)
+
+    def switch_action_bar(self, number):
+        self.actionBar.setCurrentIndex(number)
+        if number == 1:
+            self.saveSemiField.setVisible(False)
+        else:
+            self.saveSemiField.setVisible(True)
+
+    def switch_buttons(self, number):
+        self.switchBtns.setCurrentIndex(number)
+
+    def off_list_right_click(self, needOff):
+        if needOff:
+            self.testPlanListView.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
+            self.playQueueListView.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
+            self.actionListView.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
+        else:
+            self.testPlanListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            self.playQueueListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            self.actionListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+
+    def semi_result_clicked(self, result):
+        item = self.actionListView.itemWidgetByRow(self.actionListView.currentRow())
+        print item.action()
+        if item and item.action() == "CheckPoint":
+            item.setTested(result)
+            self.refreshPlayActionView()
+            if not self.select_check_point_action():
+                self.notifyPages.emit(REPORT_PAGE)
+
+    def abort_process(self):
         result = QtGui.QMessageBox.warning(self, 'Warning', 'Do you want to abort? \n(It will lose testing result.)'
-                          , QtGui.QMessageBox.Abort, QtGui.QMessageBox.Cancel)
+                                           , QtGui.QMessageBox.Abort, QtGui.QMessageBox.Cancel)
         if result == QtGui.QMessageBox.Abort:
-            self.notifyPages.emit(0)
+            self.notifyPages.emit(PLAY_LIST_PAGE)
 
     def testPlanItemDeleted(self, row, item, widget):
         del self.planDict[widget.planName()]
-        path = SCRIPT_FOLDER+'/'+widget.text()+'.csv'
+        path = SCRIPT_FOLDER + '/' + widget.text() + '.csv'
         if os.path.exists(path):
             os.remove(path)
 
@@ -2623,27 +2779,31 @@ class PlayListPage(VContainer):
         self.refreshActionList()
         self.refreshPlanActionView(refreshRow=deleteItems[0].get('row'))
 
-    def enableButtons(self, state):
+    def enable_buttons(self, state):
         self.virtualScreen.setEnabled(state)
         for btn in self.buttonList:
             btn.setEnabled(state)
 
-    def addTestPlanBtn(self):
+    def add_test_plan_btn(self):
         name, description, ok = CreateNewPage.getTestPlan()
         if ok:
             if not self.testPlanListView.haveItem(name):
-                self.setTimestamp(time.strftime("%Y/%m/%d %T", time.localtime()))
-                self.insertTestPlanItem(name)
+                self.insert_plan_item(name, time.strftime("%Y/%m/%d %T", time.localtime()))
 
-    def insertTestPlanItem(self, text):
+    def insert_plan_item(self, text, create_time=None):
         fullName = SCRIPT_FOLDER + '/' + text + '.csv'
         if not os.path.exists(fullName):
-            self.saveScript(text)
+            self.saveScript(text, create_time)
+
         actions, timestamp = self.loadScript(text)
         planItem = TestPlanItem()
         planItem.setPlanName(text)
         planItem.setActions(actions)
-        planItem.setCreateTime(timestamp)
+        if timestamp:
+            planItem.setCreateTime(timestamp)
+        else:
+            planItem.setCreateTime(create_time)
+
         planItem.setIndex(self.testPlanListView.count())
         self.planDict[text] = planItem
         self.testPlanListView.addCustomItem(self.testPlanListView.count(), TestPlanListItem(planItem))
@@ -2651,12 +2811,12 @@ class PlayListPage(VContainer):
     def findTestPlan(self):
         for f in glob.glob(SCRIPT_FOLDER + "/*.csv"):
             baseName = os.path.basename(f)
-            self.insertTestPlanItem(baseName[0:baseName.find('.csv')])
+            self.insert_plan_item(baseName[0:baseName.find('.csv')])
 
     def addPlanQueueBtn(self):
         name, start, end, repeat, ok = QueueAddPage.getInformation(self.planDict)
         if ok:
-            playActions = copy.deepcopy(self.planDict.get(name).actions()[int(start)-1:int(end)])
+            playActions = copy.deepcopy(self.planDict.get(name).actions()[int(start) - 1:int(end)])
             playItem = PlayItem()
             playItem.setPlayName(name)
             playItem.setRange((int(start), int(end)))
@@ -2680,84 +2840,127 @@ class PlayListPage(VContainer):
         return self.selectedActionItem
 
     def disconnected(self):
-        self.enableButtons(False)
-        self.aboutDeviceWidget.setCurrentIndex(1)
+        self.switch_right_frame(self.RIGHT_DISCONNECT_PAGE)
 
     def connected(self):
-        self.aboutDeviceWidget.setCurrentIndex(0)
+        self.switch_right_frame(self.RIGHT_VIRTUAL_PAGE)
 
     def testPlanSelected(self, item):
         if item:
-            self.enableButtons(True)
+            self.enable_buttons(True)
             self.selectedPlanItem = item
             self.selectedActionItem = None
-            self.actionListView.clear()
-            self.createTime.setText(self.getTimestamp())
+            self.createTime.setText(self.testPlanListView.itemWidget(item).createTime())
             self.setCurrentPlanName(self.testPlanListView.itemWidget(item).planName())
             self.refreshPlanActionView()
             self.planNameLabel.setText(self.getCurrentPlanName())
             self.descriptionEdit.clear()
 
     def playQueueSelected(self, item):
+        print "playQueueSelected"
         if item:
             self.selectedPlanItem = item
             self.selectedActionItem = None
-            self.actionListView.clear()
-            self.enableButtons(True)
+            self.enable_buttons(True)
             itemWidget = self.playQueueListView.itemWidget(item)
             self.setCurrentPlayName(itemWidget.text())
             self.planNameLabel.setText('%s' % (itemWidget.text()))
             self.refreshPlayActionView()
 
+            if self.currentPage == REPORT_PAGE:
+                item = TestResultItem(self.playQueueListView.itemWidgetByRow(self.playQueueListView.currentRow()).actions())
+                self.setReportAnalysis(item)
+
+    def setReportAnalysis(self, resultItem):
+        self.totalCountLabel.setText(str(resultItem.total_count()))
+        self.passCountLabel.setText(str(resultItem.pass_count()))
+        self.failCountLabel.setText(str(resultItem.fail_count()))
+        self.passRatioValueLabel.setText(str(resultItem.pass_ratio())+'%')
+        self.failRatioValueLabel.setText(str(resultItem.fail_ratio())+'%')
+        self.semiRatioValueLabel.setText(str(resultItem.semi_ratio())+'%')
+
+        self.pass_fail_pie.setStartAngle(0)
+        self.pass_fail_pie.setSpanAngle(360 * resultItem.pass_ratio() / 100)
+        self.semi_total_pie.setStartAngle(0)
+        self.semi_total_pie.setSpanAngle(360 * resultItem.semi_ratio() / 100)
+
+        self.pass_fail_pie.update()
+        self.semi_total_pie.update()
+
+
+
     def actionSelected(self, item):
         if item:
+            if self.sideStack.currentIndex() == 0:
+                widgetItem = self.planDict.get(self.getCurrentPlanName()).actions()[self.actionListView.row(item)]
+            else:
+                widgetItem = self.playQueueDict.get(self.getCurrentPlayName()).actions()[self.actionListView.row(item)]
             self.selectedActionItem = item
             self.descriptionEdit.setEnabled(True)
-            item = self.planDict.get(self.getCurrentPlanName()).actions()[self.actionListView.row(item)]
-            self.descriptionEdit.setPlainText(item.annotation())
+            self.descriptionEdit.setPlainText(widgetItem.annotation())
 
-    def checkUI(self, checkType):
-        self.virtualScreen.drawGrid(self._device.dump(), checkType)
+            if self.currentPage == 2:  # show screenshot if it is in semi-check page
+                postPixmap = QtGui.QPixmap(
+                    IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, int(widgetItem.index()) - 1))
+                if not postPixmap.isNull():
+                    postPixmap = postPixmap.scaled(postPixmap.size().width() * 328 / postPixmap.size().width(),
+                                                   postPixmap.size().height() * 328 / postPixmap.size().height(),
+                                                   aspectMode=QtCore.Qt.KeepAspectRatio)
+
+                afterPixmap = QtGui.QPixmap(
+                    IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, int(widgetItem.index())))
+                if not afterPixmap.isNull():
+                    afterPixmap = afterPixmap.scaled(afterPixmap.size().width() * 328 / afterPixmap.size().width(),
+                                                     afterPixmap.size().height() * 328 / afterPixmap.size().height(),
+                                                     aspectMode=QtCore.Qt.KeepAspectRatio)
+
+                self.beforePixLabel.setPixmap(postPixmap)
+                self.afterPixLabel.setPixmap(afterPixmap)
+
+                if widgetItem.action() == 'CheckPoint':
+                    self.checkPointDescription.setText(widgetItem.parameter()[0])
+                    self.rightScreenShotField.setVisible(False)
+                else:
+                    self.rightScreenShotField.setVisible(True)
+
+    def select_check_point_action(self):
+        for ranWidget in self.resultPool:
+            for action in ranWidget.actions():
+                if action.tested() == autoSense.SEMI:
+                    self.playQueueListView.setCurrentItem(self.playQueueListView.itemByItemWidget(ranWidget))
+                    self.actionListView.setCurrentRow(ranWidget.actions().index(action))
+                    return True
+
+    def notify_Check_UI(self, check_type):
+        """
+        It draw gird on virtual screen for user to check UI component.
+        :param check_type:
+        :return: None
+        """
+        self.virtualScreen.drawGrid(self._device.dump(), check_type)
         self.virtualScreen.setMouseIgnore(True)
 
-    def switchPlanAndQueue(self, number):
-        self.actionListView.clear()
-        self.planNameLabel.setText('')
-        self.createTime.setText('')
-        if number == 0:
-            self.titleList[0].setEnabled(False)
-            self.titleList[1].setEnabled(True)
-            self.sideStack.setCurrentIndex(0)
-            self.testPlanListView.setCurrentRow(-1)
-            if self.testPlanListView.count() != 0:
-                self.testPlanListView.setCurrentRow(0)
-        else:
-            self.titleList[0].setEnabled(True)
-            self.titleList[1].setEnabled(False)
-            self.sideStack.setCurrentIndex(1)
-            self.playQueueListView.setCurrentRow(-1)
-            if self.playQueueListView.count() != 0:
-                self.playQueueListView.setCurrentRow(0)
-
-    def readyScript(self):
-        del self.playQueueList[:]
+    def ready_script(self):
+        del self.runQueueList[:]
+        del self.resultPool[:]
         for num in range(self.playQueueListView.count()):
             item = self.playQueueListView.item(num)
             queueWidget = self.playQueueListView.itemWidget(item)
             if queueWidget.isChecked():
-                self.playQueueList.append(queueWidget)
+                self.runQueueList.append(queueWidget)
 
-        if len(self.playQueueList) > 0:
+        if len(self.runQueueList) > 0:
             self.processGif.start()
             self.isRunning = True
-            self.switchBtns.setCurrentIndex(1)
+            self.switch_buttons(1)
             self.playQueueListView.setEnabled(False)
             self.notifyPages.emit(1)
-            self.playQueueList.reverse()
-            self.runScript(self.playQueueList[-1])
+            self.runQueueList.reverse()
+            self.run_script(self.runQueueList[-1])
 
-    def runScript(self, queueWidget):
-        self.setCurrentPlanName(queueWidget.playName())
+    def run_script(self, queueWidget):
+        # self.setCurrentPlanName(queueWidget.playName())
+
         self.playQueueListView.setCurrentItem(self.playQueueListView.itemByItemWidget(queueWidget))
         viewRange = queueWidget.range()
         self.refreshPlayActionView()
@@ -2767,6 +2970,7 @@ class PlayListPage(VContainer):
                                                     viewRange[0],
                                                     viewRange[1]))
         self.rsThread.setActions(queueWidget.actions())
+        self.rsThread.setPlayName(self.getCurrentPlayName())
         self.rsThread.setTimes(queueWidget.repeat())
         self.rsThread.setStartIndex(0)
         self.rsThread.start()
@@ -2774,21 +2978,25 @@ class PlayListPage(VContainer):
     def stopRun(self):
         if self.rsThread.isRunning():
             self.rsThread.stop()
-        self.switchBtns.setCurrentIndex(0)
+        self.switch_buttons(0)
 
-    def setScreenContent(self):
+    def notifySetScreenContent(self):
+        """
+        Show device screen
+        :return:
+        """
         try:
             pic = QtGui.QPixmap(self.picPath)
             if not pic.isNull():
-                self.ratio = self.calculateScale(self._device.getCurrDisplay(), self.virtualWidget.size())
+                self.ratio = self.calculate_scale(self._device.getCurrDisplay(), self.virtualWidget.size())
                 pic = pic.scaled(pic.size().width() * self.ratio,
                                  pic.size().height() * self.ratio,
                                  aspectMode=QtCore.Qt.KeepAspectRatio)
                 if not self.virtualScreen.pixmap():
                     self.virtualScreen.setPixmap(pic)
                 # self.scrollArea.setFixedSize(pic.size().width() + 2, pic.size().height() + 2)
-                longSide = max([pic.size().width(), pic.size().height()])
-                self.virtualFrame.setMaximumSize(longSide, longSide)
+                long_side = max([pic.size().width(), pic.size().height()])
+                self.virtualFrame.setMaximumSize(long_side, long_side)
                 self.virtualScreen.setMaximumSize(pic.size().width(), pic.size().height())
                 self.virtualScreen.setPicScale(self.ratio)
                 self.virtualScreen.update()
@@ -2797,18 +3005,17 @@ class PlayListPage(VContainer):
         except OSError as e:
             print 'OSError: ' + e.message
 
-    def calculateScale(self, displayInfo, size):
+    def calculate_scale(self, displayInfo, size):
         width = displayInfo['width']
         height = displayInfo['height']
-        shortSide = min(size.width(), size.height())
+        short_side = min(size.width(), size.height())
         if width > height:
-            ratio = shortSide * 0.9 / width  # virtual screen margins 1/8 width of screen container
+            ratio = short_side * 0.9 / width  # virtual screen margins 1/8 width of screen container
         elif width < height:
-            ratio = shortSide * 0.9 / height
+            ratio = short_side * 0.9 / height
         return ratio
 
-    def addListItem(self, action, param='', info=''):
-        print 'addListItem'
+    def add_list_item(self, action, param='', info=''):
         insertRow = self.actionListView.getInsertRow()
         item = AutoSenseItem()
         item.setIndex(self.actionListView.count() + 1)
@@ -2819,29 +3026,10 @@ class PlayListPage(VContainer):
         self.refreshActionList()
         self.refreshPlanActionView()
 
-    def switchMode(self, mode):
-        if mode == 0:
-            self.currentPage = 0
-            self.switchPlanAndQueue(0)
-            self.aboutDeviceWidget.setCurrentIndex(0)
-            self.actionBar.setCurrentIndex(0)
-            self.offListRightClick(False)
-        elif mode == 1:
-            self.currentPage = 1
-            self.aboutDeviceWidget.setCurrentIndex(self.PROCESSING_PAGE)
-            self.actionBar.setCurrentIndex(1)
-            self.offListRightClick(True)
-        elif mode == 2:
-            self.aboutDeviceWidget.setCurrentIndex(self.SEMICHECK_PAGE)
-            self.actionBar.setCurrentIndex(1)
-            self.offListRightClick(True)
-        elif mode == 3:
-            pass
-
     def refreshActionList(self):
         actionList = self.planDict.get(self.getCurrentPlanName()).actions()
         for i in range(len(actionList)):
-            actionList[i].setIndex(i+1)
+            actionList[i].setIndex(i + 1)
         self.saveScript(self.getCurrentPlanName())
 
     def refreshPlanActionView(self, refreshRow=-1, scrollToIndex=None):
@@ -2858,7 +3046,7 @@ class PlayListPage(VContainer):
             actionList = self.planDict.get(self.getCurrentPlanName()).actions()
 
             for i in range(len(actionList)):
-                actionListItem = ActionListItem(actionList[i], i+1)
+                actionListItem = ActionListItem(actionList[i], i + 1)
                 self.actionListView.addCustomItem(i, actionListItem)
 
             if scrollToIndex:
@@ -2866,7 +3054,7 @@ class PlayListPage(VContainer):
         else:
             actionList = self.planDict.get(self.getCurrentPlanName()).actions()
             for num in range(refreshRow, len(actionList)):
-                self.actionListView.itemWidgetByRow(num).setIndex(num+1)
+                self.actionListView.itemWidgetByRow(num).setIndex(num + 1)
 
     def refreshPlayActionView(self, scrollToIndex=None):
         self.descriptionEdit.clear()
@@ -2874,19 +3062,22 @@ class PlayListPage(VContainer):
         self.descriptionEdit.setEnabled(False)
         actionList = self.playQueueDict.get(self.getCurrentPlayName()).actions()
         for i in range(len(actionList)):
-            actionListItem = ActionListItem(actionList[i], i+1)
+            actionListItem = ActionListItem(actionList[i], i + 1)
             self.actionListView.addCustomItem(i, actionListItem)
             if self.currentPage == 0 or self.sideStack.currentIndex() == 0:
                 actionListItem.setSignal(QtGui.QIcon(''))
             elif self.isRunning:
-                actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_normal.png'))
+                actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_normal.png'))
             else:
-                if actionListItem.tested() == 0:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_normal.png'))
-                elif actionListItem.tested() == 1:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_passed.png'))
-                elif actionListItem.tested() == 2:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER+'/ic_failed.png'))
+                if actionListItem.tested() == autoSense.NORMAL:
+                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_normal.png'))
+                elif actionListItem.tested() == autoSense.PASS:
+                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_passed.png'))
+                elif actionListItem.tested() == autoSense.FAIL:
+                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_failed.png'))
+                elif actionListItem.tested() == autoSense.SEMI:
+                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_semichecked.png'))
+
         if scrollToIndex:
             self.scrollListViewTo(scrollToIndex, isSelect=False)
 
@@ -2898,7 +3089,7 @@ class PlayListPage(VContainer):
     @QtCore.Slot()
     def virtualScreenResize(self, event):
         # self.ratio = self.calculateScale(self._device.getCurrDisplay(), event.size())
-        self.setScreenContent()
+        self.notifySetScreenContent()
 
     @QtCore.Slot()
     def getClick(self, point):
@@ -2910,7 +3101,7 @@ class PlayListPage(VContainer):
 
         s = json.dumps(info)
         param = list(pressPoint)
-        self.addListItem('Click', param=param, info=s)
+        self.add_list_item('Click', param=param, info=s)
 
         workExecutor(self._device.click, pressPoint)
 
@@ -2923,7 +3114,7 @@ class PlayListPage(VContainer):
         info = self._device.getTouchViewInfo(pressPoint)
         s = json.dumps(info)
         param = [x, y, duration]
-        self.addListItem('LongClick', param=param, info=s)
+        self.add_list_item('LongClick', param=param, info=s)
         workExecutor(self._device.longClick, (x, y, duration))
 
     @QtCore.Slot()
@@ -2938,7 +3129,7 @@ class PlayListPage(VContainer):
         s = json.dumps(info)
         param = self.dragFrom + self.dragTo
         param.append(speed)
-        self.addListItem('Drag', param, s)
+        self.add_list_item('Drag', param, s)
         workExecutor(self._device.drag, (self.dragFrom, self.dragTo, speed))
 
     @QtCore.Slot()
@@ -2953,7 +3144,7 @@ class PlayListPage(VContainer):
         s = json.dumps(info)
         param = self.dragFrom + self.dragTo
         param.append(speed)
-        self.addListItem('Swipe', param, s)
+        self.add_list_item('Swipe', param, s)
         workExecutor(self._device.swipe, (self.dragFrom, self.dragTo, speed))
 
     @QtCore.Slot()
@@ -2969,7 +3160,7 @@ class PlayListPage(VContainer):
         center_point = self._device.getBoundsCenter(info['bounds'])
         param.append(center_point[0])
         param.append(center_point[1])
-        self.addListItem(check_type, param)
+        self.add_list_item(check_type, param)
 
         self.virtualScreen.doneDrawGrid()
         self.virtualScreen.setMouseIgnore(False)
@@ -2984,9 +3175,15 @@ class PlayListPage(VContainer):
         else:
             return 'className=%s' % info['class']
 
+    def addCheckPoint(self):
+        inputText, ok = QtGui.QInputDialog.getText(self, 'Input Dialog',
+                                                   'Input text:', QtGui.QLineEdit.Normal)
+        if ok:
+            self.add_list_item('CheckPoint', inputText)
+
     @QtCore.Slot()
     def checkRelativeClick(self, point):
-        info = self._device.getTouchViewInfo((point.x()/self.ratio, point.y()/self.ratio))
+        info = self._device.getTouchViewInfo((point.x() / self.ratio, point.y() / self.ratio))
         self.virtualScreen.drawRelativeGrid(info.get('bounds'))
 
     @QtCore.Slot()
@@ -3008,7 +3205,7 @@ class PlayListPage(VContainer):
         param.append(y1)
         param.append(x2)
         param.append(y2)
-        self.addListItem('RelativeCheck', param)
+        self.add_list_item('RelativeCheck', param)
         self.virtualScreen.doneDrawGrid()
         self.virtualScreen.setMouseIgnore(False)
 
@@ -3016,45 +3213,85 @@ class PlayListPage(VContainer):
     def addTypeText(self):
         print 'addType'
         inputText, ok = QtGui.QInputDialog.getText(self, 'Input Dialog',
-                'Input text:', QtGui.QLineEdit.Normal)
+                                                   'Input text:', QtGui.QLineEdit.Normal)
         text = inputText.encode('utf-8').decode('ascii', 'ignore').encode('utf-8')
 
         if ok and text != '':
-            self.addListItem('Type', text)
+            self.add_list_item('Type', text)
             workExecutor(self._device.type, text)
+
+    @QtCore.Slot(AutoSenseItem)
+    def onCurrentAction(self, item):
+        index = int(item.index()) - 1
+        self.actionListView.setCurrentRow(index)
+
+    @QtCore.Slot(AutoSenseItem, int, int)
+    def onActionDone(self, item, result, index):
+        currentItem = self.actionListView.item(index)
+        currentWidgetItem = self.actionListView.itemWidget(currentItem)
+
+        if result == autoSense.PASS:
+            currentWidgetItem.setTested(autoSense.PASS)
+            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_passed.png'))
+        elif result == autoSense.FAIL:
+            currentWidgetItem.setTested(autoSense.FAIL)
+            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_failed.png'))
+        elif result == autoSense.SEMI:
+            currentWidgetItem.setTested(autoSense.SEMI)
+            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_semichecked.png'))
+
+        self.progressBar.setValue(self.progressBar.value() + 1)
+        calculate = self.progressBar.value() / self.progressBar.maximum()
+        self.percentage.setText(str((int(calculate * 100))) + '%')
+        self.rsThread.setPlayName(self.getCurrentPlayName())
+
+    @QtCore.Slot()
+    def run_done(self):
+        if len(self.runQueueList) > 1:
+            self.resultPool.append(self.runQueueList.pop())
+            self.playQueueListView.setCurrentItem(self.playQueueListView.itemByItemWidget(self.runQueueList[-1]))
+            self.run_script(self.runQueueList[-1])
+        else:
+            self.resultPool.append(self.runQueueList.pop())
+            self.switch_buttons(0)
+            self.actionListView.setCurrentRow(-1)
+            self.isRunning = False
+            self.processGif.stop()
+            self.playQueueListView.setEnabled(True)
+            self.notifyPages.emit(SEMI_CHECK_PAGE)
 
     def pressMediaCheck(self):
         testTime, timeout, isChecked, ok = MediaCheckDialog.getCheckTime()
         if ok and len(testTime) != 0 and len(timeout) != 0:
             if isChecked:
-                self.addListItem('MediaCheck', param=[testTime, timeout, 'True'])
+                self.add_list_item('MediaCheck', param=[testTime, timeout, 'True'])
             else:
-                self.addListItem('MediaCheck', param=[testTime, timeout, 'False'])
+                self.add_list_item('MediaCheck', param=[testTime, timeout, 'False'])
 
     def pressDelay(self):
         inputDelay, ok = DelayDialog.getDelay()
         if ok and len(inputDelay) != 0:
-            self.addListItem('Delay', param=inputDelay)
+            self.add_list_item('Delay', param=inputDelay)
 
     def pressBack(self):
         workExecutor(self._device.backBtn)
-        self.addListItem('Back')
+        self.add_list_item('Back')
 
     def pressPower(self):
         workExecutor(self._device.powerBtn)
-        self.addListItem('Power')
+        self.add_list_item('Power')
 
     def pressHome(self):
         workExecutor(self._device.homeBtn)
-        self.addListItem('Home')
+        self.add_list_item('Home')
 
     def pressMenu(self):
         workExecutor(self._device.menuBtn)
-        self.addListItem('Menu')
+        self.add_list_item('Menu')
 
     def unlockScreen(self):
         workExecutor(self._device.unlock)
-        self.addListItem('Unlock')
+        self.add_list_item('Unlock')
 
     def volumeUp(self):
         self._device.volumeUp()
@@ -3064,29 +3301,30 @@ class PlayListPage(VContainer):
 
     def rotateLeft(self):
         workExecutor(self._device.rotate, ('left',))
-        self.addListItem('Rotate', param='left')
+        self.add_list_item('Rotate', param='left')
 
     def rotateRight(self):
         workExecutor(self._device.rotate, ('right',))
-        self.addListItem('Rotate', param='right')
+        self.add_list_item('Rotate', param='right')
 
     def hideKeyboard(self):
         workExecutor(self._device.hideKeyboard)
-        self.addListItem('HideKeyboard')
+        self.add_list_item('HideKeyboard')
 
-    def saveScript(self, fileName):
+    def saveScript(self, fileName, timeStamp=None):
         fullName = SCRIPT_FOLDER + '/' + fileName + '.csv'
         if os.path.exists(fullName):
+            currentPlan = self.planDict.get(fileName)
             with open(fullName, 'wb') as csvfile:
                 fieldnames = [INDEX, ACTION, PARAMETER, INFORMATION, DESCRIPTION]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
-                for item in self.planDict.get(self.getCurrentPlanName()).actions():
+                for item in currentPlan.actions():
                     writer.writerow(item.inDict())
                 real = self._device.getRealDisplay()
                 resolution = [real['width'], real['height']]
                 writer.writerow({INDEX: '-1', ACTION: 'resolution', PARAMETER: str(resolution)})
-                writer.writerow({INDEX: '-2', ACTION: 'create', PARAMETER: self.getTimestamp()})
+                writer.writerow({INDEX: '-2', ACTION: 'create', PARAMETER: currentPlan.createTime()})
         else:
             with open(fullName, 'wb') as csvfile:
                 fieldnames = [INDEX, ACTION, PARAMETER, INFORMATION, DESCRIPTION]
@@ -3095,7 +3333,7 @@ class PlayListPage(VContainer):
                 real = self._device.getRealDisplay()
                 resolution = [real['width'], real['height']]
                 writer.writerow({INDEX: '-1', ACTION: 'resolution', PARAMETER: str(resolution)})
-                writer.writerow({INDEX: '-2', ACTION: 'create', PARAMETER: self.getTimestamp()})
+                writer.writerow({INDEX: '-2', ACTION: 'create', PARAMETER: timeStamp})
 
     def setCurrentPlanName(self, name):
         self.currentPlanName = name
@@ -3108,12 +3346,6 @@ class PlayListPage(VContainer):
 
     def getCurrentPlayName(self):
         return self.currentPlayName
-
-    def setTimestamp(self, name):
-        self.timestamp = name
-
-    def getTimestamp(self):
-        return self.timestamp
 
     def loadScript(self, fileName):
         screenMode = self._device.getCurrDisplay()['mode']
@@ -3151,16 +3383,21 @@ def add_font_family(app):
 
 
 def main():
-    if not os.path.exists(ROOT_FOLDER): os.mkdir(ROOT_FOLDER)
-    if not os.path.exists(LOG_FOLDER): os.mkdir(LOG_FOLDER)
-    if not os.path.exists(SCRIPT_FOLDER): os.mkdir(SCRIPT_FOLDER)
-    if not os.path.exists(PRIVATE_FOLDER): os.mkdir(PRIVATE_FOLDER)
-    if not os.path.exists(IMAGE_FOLDER): os.mkdir(IMAGE_FOLDER)
+    if not os.path.exists(ROOT_FOLDER):
+        os.mkdir(ROOT_FOLDER)
+    if not os.path.exists(LOG_FOLDER):
+        os.mkdir(LOG_FOLDER)
+    if not os.path.exists(SCRIPT_FOLDER):
+        os.mkdir(SCRIPT_FOLDER)
+    if not os.path.exists(PRIVATE_FOLDER):
+        os.mkdir(PRIVATE_FOLDER)
+    if not os.path.exists(IMAGE_FOLDER):
+        os.mkdir(IMAGE_FOLDER)
 
     app = QtGui.QApplication(sys.argv)
     add_font_family(app)
-    wid = MainPage('emulator-5554')
-    # wid = MainPage('DT08A00003871140504')
+    # wid = MainPage('emulator-5554')
+    wid = MainPage('DT08A00003871140504')
     # wid = LandingPage()
     wid.raise_()
     sys.exit(app.exec_())

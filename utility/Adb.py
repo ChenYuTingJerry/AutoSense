@@ -196,7 +196,6 @@ class AdbDevice(object):
         return result
 
     def checkSamePoint(self, point, info, isLongClick=False):
-        print info
         if not self.isScreenOn():
             self.powerBtn()
             if self.isLocked():
