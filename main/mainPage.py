@@ -5,37 +5,30 @@ Created on 2016/1/13
 @author: Jerry Chen
 """
 from __future__ import division
-from Adb import AdbDevice
-from autoSense import AutoSenseItem, PlayItem, TestPlanItem, TestResultItem, \
-    INDEX, ACTION, PARAMETER, DESCRIPTION, INFORMATION
-from Executor import workExecutor
-from DeviceManager import Manager
+
+import copy
+import csv
+import glob
+import json
+import os
+import sys
+import time
+
 from PySide import QtCore, QtGui
+
+import autoSense
+import directory as folder
+from Adb import AdbDevice
+from DeviceManager import Manager
+from Executor import workExecutor, DeviceInfoThread, PackagesThread, DeviceSettingsThread, InstallThread, \
+    WaitForDevice, UpdateScreen, SendSettingThread, RunTest
+from constants import Global, Setting, UiCheck as UI, Sense, JudgeState as State
 from GuiTemplate import MainTitleButton, IconButton, IconWithWordsButton, PushButton, TestPlanListView, MyLabel, \
     BottomLineWidget, HContainer, VContainer, TestPlanListItem, MyPlainTextEdit, MyProcessingBar, IntroWindow, \
     PictureLabel, ActionListView, DelayDialog, MediaCheckDialog, MyCheckBox, MyLineEdit, ListWidgetWithLine, \
     InfoListWidget, TitleButton, SearchBox, SettingIconButton, PlayQueueListView, PlayQueueListItem, ActionListItem, \
-    MyProgressBar, MenuButton, MyButton, DonutPie
-from constants import NFC, WIFI, AIRPLANE, GPS, AUTO_ROTATE, BLUETOOTH, DATA_ROAMING, ALLOW_APP, NO_KEEP_ACTIVITY, \
-    AUTO_BRIGHTNESS, BRIGHTNESS_SET, VIBRATE, WINDOW_ANIMATOR, TRANSITION_ANIMATOR, DURATION_ANIMATION, \
-    KEEP_WIFI, ICON_FOLDER, ROOT_FOLDER, FONT_FOLDER, LOG_FOLDER, SCRIPT_FOLDER, PRIVATE_FOLDER, \
-    IMAGE_FOLDER, IS_RELATIVE_EXIST, IS_BLANK, IS_EXIST, NO_EXIST
-import re
-import os
-import csv
-import sys
-import copy
-import time
-import glob
-import json
-import socket
-import directory as folder
-import subprocess
-import autoSense
-import uiautomator
-import threading
-from subprocess import CalledProcessError
-
+    MyProgressBar, MenuButton, MyButton, DonutPie, PieChart
+from autoSense import AutoSenseItem, PlayItem, TestPlanItem, TestResultItem
 
 PLAY_LIST_PAGE = 0
 PROCESS_PAGE = 1
@@ -57,756 +50,6 @@ def set_background_color(widget, color):
     widget.setPalette(p)
 
 
-class RunScript(QtCore.QThread):
-    """
-    Handle the reproduced actions and send back to device
-    """
-    actionResult = autoSense.FAIL
-    isStopRun = False
-    finish = QtCore.Signal()
-    currentAction = QtCore.Signal(AutoSenseItem)
-    actionDone = QtCore.Signal(AutoSenseItem, bool, int)
-
-    def __init__(self, times=1, device=None):
-        super(RunScript, self).__init__()
-        self.setTimes(times)
-        self.setDevice(device)
-        self.actionSwitcher = {
-            'Power': self.actionPower,
-            'Unlock': self.actionUnlock,
-            'Back': self.actionBack,
-            'Click': self.actionClick,
-            'Home': self.actionHome,
-            'Swipe': self.actionSwipe,
-            'Drag': self.actionDrag,
-            'LongClick': self.actionLongClick,
-            'Delay': self.actionDelay,
-            'Menu': self.actionMenu,
-            'Exist': self.actionCheckExist,
-            'NoExist': self.actionCheckNoExist,
-            'IsBlank': self.actionCheckBlank,
-            'RelativeCheck': self.actionRelativeCheck,
-            'Type': self.actionType,
-            'MediaCheck': self.actionMediaCheck,
-            'HideKeyboard': self.actionHideKeyboard,
-            'CheckPoint': self.actionCheckPoint}
-
-    def setTimes(self, times):
-        """
-        Set repeat times of running a script. It should set before running.
-        :param times: Set by user.
-        """
-        self.times = times
-
-    def setActions(self, actions):
-        """
-        Assign actions that want to play.
-        :param actions: List of AutoSense item.
-        """
-        self.actions = actions
-
-    def setDevice(self, device):
-        """
-        Assign a instance of device.
-        :param device: AdbDevice
-        """
-        self._device = device
-
-    def setPlayName(self, name):
-        self.playName = name
-
-    def checkMedia(self, passTime, timeout, isHold):
-        decryptRE = re.compile('[lL]ast\s+write\s+occurred\s+\(msecs\):\s+(?P<last_write>\d+)')
-        current_sec_time = lambda: time.time()
-        isAlreadyPass = False
-        idle = current_sec_time()
-        work = idle
-        hold = True if isHold == 'True' else False
-
-        while not self.isStopRun:
-            output = self._device.cmd.dumpsys(['media.audio_flinger'])
-            decryptMatch = decryptRE.search(output)
-            if decryptMatch is not None:
-                lastWriteTime = int(decryptMatch.group('last_write'))
-                if lastWriteTime < 1000:
-                    idle = current_sec_time()
-                    playTime = current_sec_time() - work
-                    print 'play time = ' + str(playTime) + '   passTime: ' + str(passTime)
-                    if playTime > passTime:
-                        if hold:
-                            isAlreadyPass = True
-                            timeout = 2
-                        else:
-                            return {'result': True, 'reason': ''}
-                else:
-                    work = current_sec_time()
-                    idleTime = current_sec_time() - idle
-                    print 'idleTime = ' + str(idleTime) + ', idleTime > timeout: ' + str(idleTime > timeout)
-                    if idleTime > timeout:
-                        if isAlreadyPass:
-                            return {'result': True, 'reason': ''}
-                        else:
-                            return {'result': False, 'reason': 'timeout'}
-            else:
-                print 'It can\'t figure out last write time.'
-                return {'result': False, 'reason': 'Program can\'t define whether media is playing.'}
-            time.sleep(0.1)
-
-    def actionMediaCheck(self, param, refer=None):
-        t, timeout, isHold = param
-        result = self.checkMedia(int(t), int(timeout), isHold)
-        if result is not None:
-            if result['result']:
-                self.actionResult = autoSense.PASS
-
-    def actionRelativeCheck(self, param, refer=None):
-        pass
-
-    def actionCheckPoint(self, param, refer=None):
-        self.actionResult = autoSense.SEMI
-
-    def actionType(self, param, refer=None):
-        """
-        Action of typing text.
-        :param param: a string
-        :param refer: None
-        """
-        self._device.type(param[0])
-        self.actionResult = autoSense.PASS
-
-    def actionDelay(self, param, refer=None):
-        """
-
-        :param param: (int). in second.
-        :param refer: None
-        """
-        t = int(param[0])
-        D_value = 0
-        container = []
-        startTime = float(self._device.cmd.shell(['echo', '$EPOCHREALTIME'], output=True))
-        while not self.isStopRun and D_value < t:
-            currentTime = float(self._device.cmd.shell(['echo', '$EPOCHREALTIME'], output=True))
-            D_value = currentTime - startTime
-            self.removeLastLog.emit()
-            container.append(D_value)
-            if len(container) > 1:
-                if not self._device.isScreenOn():
-                    self._device.powerBtn()
-                    if self._device.isLocked():
-                        self._device.unlock()
-                del container[:]
-            time.sleep(1)
-        self.actionResult = autoSense.PASS
-
-    def actionUnlock(self, param, refer=None):
-        """
-        Unlock screen. If screen is not locked, it will do nothing.
-        :param param: None
-        :param refer: None
-        """
-        self._device.unlock()
-        self.actionResult = autoSense.PASS
-
-    def actionMenu(self, param, refer=None):
-        """
-        Simulate menu button is pressed.
-        :param param: None
-        :param refer: None
-        """
-        self._device.cmd.inputKeyevnt('MENU')
-        self.actionResult = autoSense.PASS
-
-    def actionPower(self, param, refer=None):
-        """
-        Simulate power button is pressed.
-        :param param: None
-        :param refer: None
-        """
-        self._device.cmd.inputKeyevnt('POWER')
-        self.actionResult = autoSense.PASS
-
-    def actionHome(self, param, refer=None):
-        """
-        Simulate home button is pressed.
-        :param param: None
-        :param refer: None
-        """
-        self._device.cmd.inputKeyevnt('HOME')
-        self.actionResult = autoSense.PASS
-
-    def actionLongClick(self, param, refer=None):
-        """
-        Simulate long click.
-        :param param: [x, y, duration]
-        :param refer: A json object include view information.
-        """
-        info = json.loads(refer)
-        x, y, duration = param
-        point = (int(x), int(y))
-        self._device.longClick(point[0], point[1], int(duration))
-        self.actionResult = autoSense.PASS
-
-    def actionDrag(self, param, refer=None):
-        """
-        Simulate drag action. It can drag a view object if it can be dragged.
-        :param param: [x1, y1, x2, y2, duration]
-        :param refer: None
-        """
-        start = (param[0], param[1])
-        end = (param[2], param[3])
-        self._device.drag(start, end, int(param[4]))
-        self.actionResult = autoSense.PASS
-
-    def actionSwipe(self, param, refer=None):
-        """
-        Simulate swipe action. View won't be dragged
-        :param param: [x1, y1, x2, y2, duration]
-        :param refer: None
-        """
-        start = (param[0], param[1])
-        end = (param[2], param[3])
-        # ensure page flow
-        self._device.swipe(start, end, int(param[4]))
-        self.actionResult = autoSense.PASS
-
-    def actionBack(self, param, refer=None):
-        """
-        Simulate back button.
-        :param param: None
-        :param refer: None
-        """
-        self._device.backBtn()
-        self.actionResult = autoSense.PASS
-
-    def actionClick(self, param, refer=None):
-        """
-        Simulate click action.
-        :param param: [x, y]
-        :param refer: A json object include view information.
-        """
-        info = json.loads(refer)
-        if len(param) == 2:
-            x, y = param
-        else:
-            x, y, _ = param
-
-        point = (int(x), int(y))
-        noShow = False
-        wait = 5
-        while self._device.isConnected() and not self.isStopRun and wait > 0:
-            try:
-                if not self._device.isScreenOn():
-                    self._device.powerBtn()
-                    if self._device.isLocked():
-                        self._device.unlock()
-                result = self._device.checkSamePoint(point, info)
-                if result['answer']:
-                    self.actionResult = autoSense.PASS
-                    break
-                elif not noShow:
-                    print 'wait view'
-                time.sleep(1)
-                wait -= 1
-            except uiautomator.JsonRPCError:
-                break
-
-    def actionCheckBlank(self, param, refer=None):
-        """
-        Check the target view should not have any child view.
-        :param param: [Identification, x, y]. There are 4 kinds of identification(resourceId, text, description, className).
-        :param refer: None
-        """
-        benchmark, x, y = param
-        attribute, value = benchmark.split('=')
-        point = (int(x), int(y))
-        if attribute == 'text':
-            selector = self._device.retrieveSelector(point, self._device.d(text=value))
-            if selector:
-                if selector.childCount == 0:
-                    self.actionResult = autoSense.PASS
-            else:
-                self.actionResult = autoSense.PASS
-
-        elif attribute == 'description':
-            selector = self._device.retrieveSelector(point, self._device.d(description=value))
-            if selector:
-                if selector.childCount == 0:
-                    self.actionResult = autoSense.PASS
-            else:
-                self.actionResult = autoSense.PASS
-
-        elif attribute == 'resourceId':
-            selector = self._device.retrieveSelector(point, self._device.d(resourceId=value))
-            if selector:
-                if selector.childCount == 0:
-                    self.actionResult = autoSense.PASS
-            else:
-                self.actionResult = autoSense.PASS
-
-        elif attribute == 'className':
-            selector = self._device.retrieveSelector(point, self._device.d(className=value))
-            if selector:
-                if selector.childCount == 0:
-                    self.actionResult = autoSense.PASS
-            else:
-                self.actionResult = autoSense.PASS
-
-    def actionCheckExist(self, param, refer=None):
-        """
-        Check the target view whether is existed on the screen.
-        :param param: [Identification, x, y]. There are 4 kinds of identification(resourceId, text, description, className).
-        :param refer: None
-        """
-        benchmark, x, y = param
-        attribute, value = benchmark.split('=')
-        point = (int(x), int(y))
-        if attribute == 'text':
-            if self._device.retrieveSelector(point, self._device.d(text=value)):
-                self.actionResult = self.PASS
-                # self.report.emit(INFO, 'Pass: View exist', True)
-            else:
-                pass
-                # self.report.emit(ERROR, 'Fail: View not exist', True)
-                # self.isStopRun = True
-        elif attribute == 'description':
-            if self._device.retrieveSelector(point, self._device.d(description=value)):
-                self.actionResult = self.PASS
-                # self.report.emit(INFO, 'Pass: View exist', True)
-            else:
-                pass
-                # self.report.emit(ERROR, 'Fail: View not exist', True)
-                # self.isStopRun = True
-        elif attribute == 'resourceId':
-            if self._device.retrieveSelector(point, self._device.d(resourceId=value)):
-                self.actionResult = self.PASS
-                # self.report.emit(INFO, 'Pass: View exist', True)
-            else:
-                pass
-                # self.report.emit(ERROR, 'Fail: View not exist', True)
-                # self.isStopRun = True
-        elif attribute == 'className':
-            if self._device.retrieveSelector(point, self._device.d(className=value)):
-                self.actionResult = self.PASS
-                # self.report.emit(INFO, 'Pass: View exist', True)
-            else:
-                pass
-                # self.report.emit(ERROR, 'Fail: View not exist', True)
-                # self.isStopRun = True
-
-    def actionCheckNoExist(self, param, refer=None):
-        """
-        Check the target view whether isn't existed on the screen.
-        :param param: [Identification, x, y]. There are 4 kinds of identification(resourceId, text, description, className).
-        :param refer: None
-        """
-        benchmark, x, y = param
-        attribute, value = benchmark.split('=')
-        point = (int(x), int(y))
-        if attribute == 'text':
-            if not self._device.retrieveSelector(point, self._device.d(text=value)):
-                self.actionResult = self.PASS
-
-        elif attribute == 'description':
-            if not self._device.retrieveSelector(point, self._device.d(description=value)):
-                self.actionResult = self.PASS
-
-        elif attribute == 'resourceId':
-            if not self._device.retrieveSelector(point, self._device.d(resourceId=value)):
-                self.actionResult = self.PASS
-
-        elif attribute == 'className':
-            if not self._device.retrieveSelector(point, self._device.d(className=value)):
-                self.actionResult = self.PASS
-
-    def actionHideKeyboard(self, param, refer=None):
-        """
-        Hide soft keyboard. If keyboard isn't showed, it will do nothing.
-        :param param: None
-        :param refer: None
-        """
-        self._device.hideKeyboard()
-        self.actionResult = self.PASS
-
-    def stop(self):
-        """
-        Exit this process.
-        """
-        self.isStopRun = True
-
-    def setStartIndex(self, index):
-        """
-        chose a start index of actions.
-        :param index: integer
-        """
-        self.startIndex = index
-
-    def run(self):
-        self.isStopRun = False
-        self.limit = 0
-        try:
-            self._device.takeSnapshot(IMAGE_FOLDER + '/%s_%d.png' % (self.playName, 0))
-            while self.limit < self.times and not self.isStopRun:
-                self.limit += 1
-                for index in range(len(self.actions)):
-                    if not self.isStopRun and self.startIndex <= index:
-                        self.index = index + 1
-                        item = self.actions[index]
-                        if self._device.isConnected():
-                            self.actionResult = autoSense.FAIL
-                            self.currentAction.emit(item)
-                            self.actionSwitcher.get(item.action())(item.parameter(), item.information())
-                            self._device.takeSnapshot(IMAGE_FOLDER + '/%s_%d.png' % (self.playName, self.index))
-                            self.actionDone.emit(item, self.actionResult, index)
-                        else:
-                            self.isStopRun = True
-                            break
-
-        except socket.error:
-            print 'socket.error: device offline'
-            self.isStopRun = True
-        except ValueError as e:
-            print 'ValueError: ' + e.message
-            self.isStopRun = True
-        except CalledProcessError, exc:
-            print 'CalledProcessError: ' + str(exc)
-            self.isStopRun = True
-        finally:
-            self.finish.emit()
-
-
-class UpdateScreen(QtCore.QThread):
-    """
-    Keep capturing screen in the background.
-    """
-    loadDone = QtCore.Signal()
-    startLoad = QtCore.Signal()
-    deviceOffline = QtCore.Signal()
-    isStop = False
-    isPause = False
-
-    def __init__(self, device, picPath):
-        super(UpdateScreen, self).__init__()
-        self.isStop = False
-        self._device = device
-        self.delay = 0
-        self.picPath = picPath
-        self.lastFrameTime = 0
-        self.isRefresh = False
-        self.nconcurrent = threading.BoundedSemaphore(5)
-
-    def stop(self):
-        """ Stop capturing """
-        self.isStop = True
-
-    def pause(self):
-        """ Pause capturing """
-        self.isPause = True
-
-    def resume(self):
-        """ resume capturing """
-        self.isPause = False
-
-    def setDelay(self, delay=0):
-        """ Set a delay time to start capturing """
-        self.delay = delay
-
-    def run(self):
-        time.sleep(self.delay)
-        try:
-            self.isStop = False
-            while not self.isStop:
-                if not self.isPause and self.monitorFrame():
-                    self.startLoad.emit()
-                    self.screenshot(path=self.picPath + '/' + self._device.serialno + '_screen.png')
-                else:
-                    time.sleep(0.2)
-        except:
-            print 'device not found'
-            self.lastFrameTime = 0
-            self.deviceOffline.emit()
-
-    def monitorFrame(self):
-        """
-        monitor the screen has changed, it helps to reduce capturing frequency.
-        """
-        decryptRE = re.compile('\s+events-delivered:\s+(?P<number>\d+)')
-        output = self._device.cmd.dumpsys(['SurfaceFlinger'])
-        if output:
-            m = decryptRE.search(output)
-            if m is not None:
-                tmpTime = m.group('number')
-                if tmpTime != self.lastFrameTime:
-                    self.lastFrameTime = tmpTime
-                    return True
-
-    def screenshot(self, path, delay=0):
-        """
-        Do screen capture
-        :param path: save pic path
-        :param delay: delay to capture screen. In second.
-        """
-        try:
-            self.nconcurrent.acquire()
-            time.sleep(delay)
-            pp = time.time()
-            if self._device.isConnected():
-                self._device.takeSnapshot(path)
-            else:
-                if not self.isStop:
-                    self.deviceOffline.emit()
-            print time.time() - pp
-            if not self.isStop:
-                self.loadDone.emit()
-        except AttributeError as e:
-            print e.message
-        except IOError as e:
-            print e.message
-        finally:
-            self.nconcurrent.release()
-
-
-class WaitForDevice(QtCore.QThread):
-    '''
-    Monitor device to be connected to computer.
-    '''
-    online = QtCore.Signal()
-
-    def __init__(self, device):
-        super(WaitForDevice, self).__init__()
-        self.device = device
-        self.isStop = False
-
-    def stop(self):
-        """
-        Stop to wait device
-        """
-        self.isStop = True
-
-    def run(self):
-        print 'start to monitor'
-        self.isStop = False
-        while not self.isStop:
-            if self.device.isConnected():
-                try:
-                    print 'start to connect'
-                    self.device.connect()
-                    if not self.isStop:
-                        self.online.emit()
-                    break
-                except:
-                    print 'Keep searching'
-            time.sleep(1)
-
-
-class DeviceInfoThread(QtCore.QThread):
-    """
-    Get device information in background. Include brand,
-    modle name, serial number, android version, region, resolution,
-    manufacturer name, product name and kernel number.
-    """
-    onDeviceInfo = QtCore.Signal(dict)
-
-    def __init__(self, serialno=None):
-        super(DeviceInfoThread, self).__init__()
-        self.serialNo = serialno
-
-    def setDeviceId(self, ID):
-        """
-        Set a seria; number of target device.
-        :param ID: device serial number
-        """
-        self.serialNo = ID
-
-    def run(self):
-        holdInfo = dict()
-        device = AdbDevice(self.serialNo)
-        for prop in device.getProp().split('\n'):
-            proper = prop.replace('[', '').replace(']', '').split(':')
-            if proper[0] == 'ro.product.brand':
-                holdInfo['brand'] = proper[1].strip()
-            elif proper[0] == 'ro.product.model':
-                holdInfo['model'] = proper[1].strip()
-            elif proper[0] == 'ro.serialno':
-                holdInfo['serialNo'] = proper[1].strip()
-            elif proper[0] == 'ro.build.version.release':
-                holdInfo['android'] = proper[1].strip()
-            elif proper[0] == 'ro.build.display.id':
-                holdInfo['buildNo'] = proper[1].strip()
-            elif proper[0] == 'ro.product.locale.region':
-                holdInfo['region'] = proper[1].strip()
-            elif proper[0] == 'ro.product.manufacturer':
-                holdInfo['manufacturer'] = proper[1].strip()
-            elif proper[0] == 'ro.product.name':
-                holdInfo['name'] = proper[1].strip()
-
-        holdInfo['kernelNo'] = device.cmd.shell(['cat', 'proc/version'], output=True).strip('\r\n')
-        display = device.getRealDisplay()
-        holdInfo['resolution'] = str(display['width']) + ' x ' + str(display['height'])
-
-        self.onDeviceInfo.emit(holdInfo)
-
-
-class DeviceSettingsThread(QtCore.QThread):
-    """
-    Get device environment states. Include NFC, WiFi, airplan mode,
-    GPS, AutoRotate, Bluetooth, Brightness, install unknown app,
-    Vibrate, Auto-Brightness, Window animator, transition animator,
-    duration animation and no keep activity.
-    """
-    currentSettings = QtCore.Signal(dict, bool)
-    device = None
-
-    def __init__(self):
-        super(DeviceSettingsThread, self).__init__()
-
-    def setDevice(self, device):
-        """
-        Set target device.
-        :param device: AdbDevice
-        """
-        self.device = device
-
-    def run(self):
-        try:
-            xx = dict()
-            xx[NFC] = self.device.isNfcOn()
-            xx[WIFI] = self.device.isWifiOn()
-            xx[AIRPLANE] = self.device.isAirPlaneModeOn()
-            xx[GPS] = self.device.isGpsOn()
-            xx[AUTO_ROTATE] = self.device.isAutoRotateOn()
-            xx[BLUETOOTH] = self.device.isBtOn()
-            xx[DATA_ROAMING] = self.device.isDataRoamingOn()
-            xx[ALLOW_APP] = self.device.isInstallUnknownSources()
-            xx[NO_KEEP_ACTIVITY] = self.device.isNoKeepActivityOn()
-            xx[AUTO_BRIGHTNESS] = self.device.isAutoBrightnessOn()
-            xx[BRIGHTNESS_SET] = self.device.screenTimeout()
-            xx[VIBRATE] = self.device.isVibrateWhenRingOn()
-            xx[WINDOW_ANIMATOR] = self.device.isWindowAniOn()
-            xx[TRANSITION_ANIMATOR] = self.device.isTransitionAnuOn()
-            xx[DURATION_ANIMATION] = self.device.isDurationAniOn()
-            self.currentSettings.emit(xx, True)
-        except subprocess.CalledProcessError:
-            self.currentSettings.emit(dict(), False)
-
-
-class PackagesThread(QtCore.QThread):
-    """
-    Get packages name in device. Include all, system, 3rd party and recent.
-    """
-    currentPackages = QtCore.Signal(list)
-    device = None
-    t = ''
-
-    def __init__(self):
-        super(PackagesThread, self).__init__()
-
-    def setDevice(self, device):
-        """
-        Set target device.
-        :param device: AdbDevice
-        """
-        self.device = device
-
-    def setType(self, t):
-        """
-        Set package type
-        :param t: request package type
-        """
-        self.t = t
-
-    def run(self):
-        self.currentPackages.emit(self.device.requestPackage(self.t))
-
-
-class SendSettingThread(QtCore.QThread):
-    """
-    Set device environment states. Include NFC, WiFi, airplan mode,
-    GPS, AutoRotate, Bluetooth, Brightness, install unknown app,
-    Vibrate, Auto-Brightness, Window animator, transition animator,
-    duration animation and no keep activity.
-    """
-    mDict = dict()
-    done = QtCore.Signal()
-
-    def __init__(self, settingDict, device):
-        super(SendSettingThread, self).__init__()
-        self.mDict = settingDict
-        self.device = device
-
-    def run(self):
-        needReboot = False
-        for key, value in self.mDict.iteritems():
-            print 'key = ' + key
-            if key == AIRPLANE:
-                self.device.enableAirplaneMode(value)
-            elif key == NFC:
-                self.device.enableNfc(value)
-            elif key == ALLOW_APP:
-                self.device.enableInstallUnknownSources(value)
-            elif key == WIFI:
-                self.device.enableWifi(value)
-            elif key == BLUETOOTH:
-                self.device.enableBluetooth(value)
-            elif key == NO_KEEP_ACTIVITY:
-                self.device.enableNoKeepActivity(value)
-            elif key == DATA_ROAMING:
-                self.device.enableDataRoaming(value)
-            elif key == AUTO_ROTATE:
-                self.device.enableAutoRotate(value)
-            elif key == GPS:
-                self.device.enableGps(value)
-            elif key == AUTO_BRIGHTNESS:
-                self.device.enableAutoBrightness(value)
-            elif key == VIBRATE:
-                self.device.enableVibrateWhenRing(value)
-            elif key == BRIGHTNESS_SET:
-                self.device.setScreenTimeout(str(long(value) * 1000))
-            elif key == WINDOW_ANIMATOR:
-                if self.device.isWindowAniOn() != value:
-                    self.device.enableWindowAnimator(not value)
-                    needReboot = True
-            elif key == TRANSITION_ANIMATOR:
-                if self.device.isTransitionAnuOn() != value:
-                    self.device.enableTransitionAnimator(not value)
-                    needReboot = True
-            elif key == DURATION_ANIMATION:
-                print self.device.isDurationAniOn() != value
-                if self.device.isDurationAniOn() != value:
-                    self.device.enableDurationAnimation(not value)
-                    needReboot = True
-
-        self.sleep(5)
-        if needReboot:
-            print 'reboot'
-            self.device.reboot()
-
-        while needReboot:
-            self.sleep(2)
-            try:
-                if self.device.isConnected():
-                    self.device.screenTimeout()
-                    needReboot = False
-            except ValueError:
-                pass
-        self.done.emit()
-
-
-class InstallThread(QtCore.QThread):
-    """
-    Install app
-    """
-    done = QtCore.Signal()
-
-    def __init__(self, f, device):
-        super(InstallThread, self).__init__()
-        self.f = f
-        self.device = device
-
-    def run(self):
-        self.device.install(self.f)
-        self.done.emit()
-
-
 class LandingPage(IntroWindow):
     """
     Program entry point.
@@ -815,7 +58,7 @@ class LandingPage(IntroWindow):
 
     def __init__(self):
         super(LandingPage, self).__init__()
-        logo = QtGui.QPixmap(ICON_FOLDER + '/' + 'ic_logo_with_shadow.png')
+        logo = QtGui.QPixmap(Global.ICON_FOLDER + '/' + 'ic_logo_with_shadow.png')
         self.lbl = QtGui.QLabel()
         self.lbl.setPixmap(logo)
 
@@ -833,7 +76,7 @@ class LandingPage(IntroWindow):
         self.welcomeSubTitle.setFont(font)
 
         self.createBtn = QtGui.QPushButton()
-        self.createBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_create_testplan_normal.png'))
+        self.createBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_create_testplan_normal.png'))
         self.createBtn.setStyleSheet('border: 0px')
         self.createBtn.setIconSize(QtCore.QSize(40, 40))
         self.createBtn.clicked.connect(self.button_clicked)
@@ -846,7 +89,7 @@ class LandingPage(IntroWindow):
         self.createLayout.setContentsMargins(0, 0, 36, 0)
 
         self.loadBtn = QtGui.QPushButton()
-        self.loadBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_load_testplan_normal.png'))
+        self.loadBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_load_testplan_normal.png'))
         self.loadBtn.setStyleSheet('border: 0px')
         self.loadBtn.setIconSize(QtCore.QSize(40, 40))
         self.loadTitle = QtGui.QLabel('Load Testplan')
@@ -858,7 +101,7 @@ class LandingPage(IntroWindow):
         self.loadLayout.setContentsMargins(0, 0, 0, 0)
 
         self.readBtn = QtGui.QPushButton()
-        self.readBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_read_userguide.png'))
+        self.readBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_read_userguide.png'))
         self.readBtn.setStyleSheet('border: 0px')
         self.readBtn.setIconSize(QtCore.QSize(128, 128))
         self.readTitle = QtGui.QLabel('Read\nUser Guide')
@@ -954,7 +197,7 @@ class CreateNewPage(IntroWindow):
         font = self.warningLabel.font()
         font.setPixelSize(12)
         self.warningLabel.setFont(font)
-        self.icon = QtGui.QPixmap(ICON_FOLDER + '/ic_warning.png')
+        self.icon = QtGui.QPixmap(Global.ICON_FOLDER + '/ic_warning.png')
         self.iconLabel = QtGui.QLabel()
         self.iconLabel.setPixmap(self.icon)
         self.initUI()
@@ -1032,8 +275,8 @@ class ChoseDevicePage(IntroWindow):
         self.listTitle.setStyleSheet('color: white; font: 14px')
         self.listTitle.setAlignment(QtCore.Qt.AlignCenter)
         self.refreshBtn = IconButton()
-        self.refreshBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_refresh_normal.png'))
-        self.refreshBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_refresh_press.png'))
+        self.refreshBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_refresh_normal.png'))
+        self.refreshBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_refresh_press.png'))
         self.refreshBtn.clicked.connect(self.refreshDeviceList)
         self.refreshBtn.setIconSize(QtCore.QSize(16, 16))
         self.refreshBtn.setFixedSize(self.refreshBtn.sizeHint())
@@ -1174,7 +417,7 @@ class ChoseDevicePage(IntroWindow):
         self.deviceList.addCustomItems(devices)
 
     def askForDevices(self):
-        manager = Manager(ROOT_FOLDER)
+        manager = Manager(Global.ROOT_FOLDER)
         devices = manager.connectableDevices()
         return devices
 
@@ -1326,7 +569,7 @@ class QueueAddPage(IntroWindow):
 class NoConnectDevicePage(IntroWindow):
     def __init__(self):
         super(NoConnectDevicePage, self).__init__()
-        self.noConnectPix = QtGui.QPixmap(ICON_FOLDER + '/ic_no_connect.png')
+        self.noConnectPix = QtGui.QPixmap(Global.ICON_FOLDER + '/ic_no_connect.png')
         self.noConnectPixLbl = QtGui.QLabel()
         self.noConnectPixLbl.setPixmap(self.noConnectPix)
 
@@ -1429,12 +672,12 @@ class SettingPage(IntroWindow):
         self.wifiBox = MyCheckBox('WIFI', font_weight=QtGui.QFont.Light, font_size=12, identity='wifi')
         self.wifiBox.onStateChanged.connect(self.checkBoxChanged)
 
-        self.checkBoxDict[AIRPLANE] = self.airplaneBox
-        self.checkBoxDict[BLUETOOTH] = self.btBox
-        self.checkBoxDict[DATA_ROAMING] = self.roamingBox
-        self.checkBoxDict[GPS] = self.gpsBox
-        self.checkBoxDict[NFC] = self.nfcBox
-        self.checkBoxDict[WIFI] = self.wifiBox
+        self.checkBoxDict[Setting.AIRPLANE] = self.airplaneBox
+        self.checkBoxDict[Setting.BLUETOOTH] = self.btBox
+        self.checkBoxDict[Setting.DATA_ROAMING] = self.roamingBox
+        self.checkBoxDict[Setting.GPS] = self.gpsBox
+        self.checkBoxDict[Setting.NFC] = self.nfcBox
+        self.checkBoxDict[Setting.WIFI] = self.wifiBox
 
         oneVbox = QtGui.QVBoxLayout()
         oneVbox.setContentsMargins(0, 0, 0, 0)
@@ -1488,13 +731,13 @@ class SettingPage(IntroWindow):
         self.subHWidget.setLayout(subHBox)
         self.subHWidget.setFixedSize(subHBox.sizeHint())
 
-        self.checkBoxDict[AUTO_ROTATE] = self.autoRotateBox
-        self.checkBoxDict[AUTO_BRIGHTNESS] = self.autoBrightnessBox
-        self.checkBoxDict[BRIGHTNESS_SET] = self.timeoutEdit
-        self.checkBoxDict[ALLOW_APP] = self.allowAppBox
-        self.checkBoxDict[NO_KEEP_ACTIVITY] = self.noKeepActivityBox
-        self.checkBoxDict[VIBRATE] = self.vibrateBox
-        self.checkBoxDict[KEEP_WIFI] = self.keepWifiBox
+        self.checkBoxDict[Setting.AUTO_ROTATE] = self.autoRotateBox
+        self.checkBoxDict[Setting.AUTO_BRIGHTNESS] = self.autoBrightnessBox
+        self.checkBoxDict[Setting.BRIGHTNESS_SET] = self.timeoutEdit
+        self.checkBoxDict[Setting.ALLOW_APP] = self.allowAppBox
+        self.checkBoxDict[Setting.NO_KEEP_ACTIVITY] = self.noKeepActivityBox
+        self.checkBoxDict[Setting.VIBRATE] = self.vibrateBox
+        self.checkBoxDict[Setting.KEEP_WIFI] = self.keepWifiBox
 
         twoVbox = QtGui.QVBoxLayout()
         twoVbox.setContentsMargins(0, 0, 0, 0)
@@ -1522,9 +765,9 @@ class SettingPage(IntroWindow):
                                          identity='duration_animation')
         self.durationAniBox.onStateChanged.connect(self.checkBoxChanged)
 
-        self.checkBoxDict[WINDOW_ANIMATOR] = self.windowAniBox
-        self.checkBoxDict[TRANSITION_ANIMATOR] = self.transitionAniBox
-        self.checkBoxDict[DURATION_ANIMATION] = self.durationAniBox
+        self.checkBoxDict[Setting.WINDOW_ANIMATOR] = self.windowAniBox
+        self.checkBoxDict[Setting.TRANSITION_ANIMATOR] = self.transitionAniBox
+        self.checkBoxDict[Setting.DURATION_ANIMATION] = self.durationAniBox
 
         threeVbox = QtGui.QVBoxLayout()
         threeVbox.setContentsMargins(0, 0, 0, 0)
@@ -1552,18 +795,18 @@ class SettingPage(IntroWindow):
 
     def initialManagerPage(self):
         installBtn = IconButton()
-        installBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_add app_normal.png'))
-        installBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_add app_press.png'))
+        installBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_add app_normal.png'))
+        installBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_add app_press.png'))
         installBtn.setIconSize(QtCore.QSize(20, 20))
         installBtn.clicked.connect(self.install)
         uninstallBtn = IconButton()
-        uninstallBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_delete app_normal.png'))
-        uninstallBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_delete app_press.png'))
+        uninstallBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_delete app_normal.png'))
+        uninstallBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_delete app_press.png'))
         uninstallBtn.clicked.connect(self.uninstall)
         uninstallBtn.setIconSize(QtCore.QSize(20, 20))
         clearBtn = IconButton()
-        clearBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_clear data _normal.png'))
-        clearBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_clear data _normal.png'))
+        clearBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_clear data _normal.png'))
+        clearBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_clear data _normal.png'))
         clearBtn.clicked.connect(self.clear)
         clearBtn.setIconSize(QtCore.QSize(20, 20))
 
@@ -1636,14 +879,14 @@ class SettingPage(IntroWindow):
         self.generalBtn = SettingIconButton('General', font_size=14, color='#F8F8F8')
         self.generalBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
         self.generalBtn.clicked.connect(lambda page=0: self.switchPage(page))
-        self.generalBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_general_setting_normal.png'))
-        self.generalBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_general_setting_press.png'))
+        self.generalBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_general_setting_normal.png'))
+        self.generalBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_general_setting_press.png'))
         # self.generalBtn.
         self.generalBtn.setFixedHeight(96)
         self.apkManagerBtn = SettingIconButton('APK manager', font_size=14, color='#F8F8F8')
         self.apkManagerBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
-        self.apkManagerBtn.setIcon(QtGui.QIcon(ICON_FOLDER + '/ic_apk_manager_normal.png'))
-        self.apkManagerBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_apk_manager_press.png'))
+        self.apkManagerBtn.setIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_apk_manager_normal.png'))
+        self.apkManagerBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_apk_manager_press.png'))
         self.apkManagerBtn.clicked.connect(lambda page=1: self.switchPage(page))
         self.apkManagerBtn.setFixedHeight(96)
 
@@ -1689,12 +932,12 @@ class SettingPage(IntroWindow):
 
     def timeoutChanged(self, text):
         if not self.isGetting:
-            self.changeDict[BRIGHTNESS_SET] = text
+            self.changeDict[Setting.BRIGHTNESS_SET] = text
 
     def onCurrentSettings(self, current, success):
         if success:
             for key, value in current.iteritems():
-                if key != BRIGHTNESS_SET:
+                if key != Setting.BRIGHTNESS_SET:
                     self.checkBoxDict.get(key).setEnabled(True)
 
                     if value:
@@ -1784,7 +1027,7 @@ class WaitDeviceSetting(IntroWindow):
         self.mThread = SendSettingThread(settingDict, self.device)
         self.mThread.done.connect(self.onDone)
         self.mThread.start()
-        self.dontTouchPix = QtGui.QPixmap(ICON_FOLDER + '/ic_dont_youch_device.png')
+        self.dontTouchPix = QtGui.QPixmap(Global.ICON_FOLDER + '/ic_dont_youch_device.png')
         self.dontTouchPixLbl = QtGui.QLabel()
         self.dontTouchPixLbl.setPixmap(self.dontTouchPix)
         self.dontTouchPixLbl.setAlignment(QtCore.Qt.AlignCenter)
@@ -1842,7 +1085,7 @@ class WaitDeviceInstalled(IntroWindow):
         self.mThread = InstallThread(f, self.device)
         self.mThread.done.connect(self.onDone)
         self.mThread.start()
-        self.installPix = QtGui.QPixmap(ICON_FOLDER + '/ic_installing_app.png')
+        self.installPix = QtGui.QPixmap(Global.ICON_FOLDER + '/ic_installing_app.png')
         self.installPixLbl = QtGui.QLabel()
         self.installPixLbl.setPixmap(self.installPix)
         self.installPixLbl.setAlignment(QtCore.Qt.AlignCenter)
@@ -1924,7 +1167,7 @@ class MainPage(QtGui.QWidget):
     def deviceConnected(self):
         if self.currentPage() == 0:
             self.playPage.connected()
-            self.updateScreen = UpdateScreen(self._device, PRIVATE_FOLDER)
+            self.updateScreen = UpdateScreen(self._device, Global.PRIVATE_FOLDER)
             self.updateScreen.loadDone.connect(self.loadDone)
             self.updateScreen.deviceOffline.connect(self.deviceOffline)
             self.updateScreen.start()
@@ -1996,7 +1239,6 @@ class MainPage(QtGui.QWidget):
 
         self.scriptConvertAction = toolMenu.addAction('Script conversion')
 
-
     def switchPlayListPage(self):
         self.enablePage(PLAY_LIST_PAGE)
         if self.updateScreen:
@@ -2044,7 +1286,7 @@ class MainPage(QtGui.QWidget):
     @QtCore.Slot()
     def loadDone(self):
         if self.updateScreen.isRunning():
-            self.playPage.notifySetScreenContent()
+            self.playPage.notify_show_screen_content()
 
     @QtCore.Slot()
     def deviceOffline(self):
@@ -2076,6 +1318,9 @@ class PlayListPage(VContainer):
     selectedActionItem = None
     currentPlanName = None
     currentPlayName = None
+    currentActionItemRow = None
+    afterPixmap = None
+    beforePixmap = None
     buttonList = list()
     planDict = dict()
     playQueueDict = dict()
@@ -2094,7 +1339,7 @@ class PlayListPage(VContainer):
     def __init__(self, device):
         super(PlayListPage, self).__init__()
         self._device = device
-        self.picPath = PRIVATE_FOLDER + '/' + str(self._device.serialno) + '_screen.png'
+        self.picPath = Global.PRIVATE_FOLDER + '/' + str(self._device.serialno) + '_screen.png'
         self.init_action_bar()
         self.init_left_frame()
         self.init_right_frame()
@@ -2104,7 +1349,7 @@ class PlayListPage(VContainer):
         self.addWidget(self.actionBar)
         self.addWidget(self.combineWidget)
 
-        self.rsThread = RunScript(device=self._device)
+        self.rsThread = RunTest(device=self._device)
         self.rsThread.currentAction.connect(self.onCurrentAction)
         self.rsThread.actionDone.connect(self.onActionDone)
         self.rsThread.finish.connect(self.run_done)
@@ -2134,29 +1379,29 @@ class PlayListPage(VContainer):
         typeTextBtn.setFixedSize(40, 40)
         hideKeyboardBtn.setFixedSize(40, 40)
 
-        backBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_back_normal.png'))
-        homeBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_home_normal.png'))
-        menuBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_menu_normal.png'))
-        powerBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_power_normal.png'))
-        volumeUp.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_zoomin_normal.png'))
-        volumeDown.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_zoonout_normal.png'))
-        rotateLeftBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_rotate_left_normal.png'))
-        rotateRightBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_rotate_right_normal.png'))
-        unlockBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_unlock_normal.png'))
-        typeTextBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_typetext_normal.png'))
-        hideKeyboardBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_hide_keyboard_normal.png'))
+        backBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_back_normal.png'))
+        homeBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_home_normal.png'))
+        menuBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_menu_normal.png'))
+        powerBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_power_normal.png'))
+        volumeUp.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_zoomin_normal.png'))
+        volumeDown.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_zoonout_normal.png'))
+        rotateLeftBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_rotate_left_normal.png'))
+        rotateRightBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_rotate_right_normal.png'))
+        unlockBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_unlock_normal.png'))
+        typeTextBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_typetext_normal.png'))
+        hideKeyboardBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_hide_keyboard_normal.png'))
 
-        backBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_back_press.png'))
-        homeBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_home_press.png'))
-        menuBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_menu_press.png'))
-        powerBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_power_press.png'))
-        volumeUp.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_zoomin_press.png'))
-        volumeDown.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_zoonout_press.png'))
-        rotateLeftBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_rotate_left_press.png'))
-        rotateRightBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_rotate_right_press.png'))
-        unlockBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_unlock_press.png'))
-        typeTextBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_typetext_press.png'))
-        hideKeyboardBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_hide_keyboard_press.png'))
+        backBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_back_press.png'))
+        homeBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_home_press.png'))
+        menuBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_menu_press.png'))
+        powerBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_power_press.png'))
+        volumeUp.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_zoomin_press.png'))
+        volumeDown.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_zoonout_press.png'))
+        rotateLeftBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_rotate_left_press.png'))
+        rotateRightBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_rotate_right_press.png'))
+        unlockBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_unlock_press.png'))
+        typeTextBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_typetext_press.png'))
+        hideKeyboardBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_hide_keyboard_press.png'))
 
         backBtn.clicked.connect(self.pressBack)
         homeBtn.clicked.connect(self.pressHome)
@@ -2191,18 +1436,19 @@ class PlayListPage(VContainer):
 
         checkUiBtn = MenuButton('Check', font_size=12, font_weight=QtGui.QFont.Light, text_color='#D1D1D1')
         checkUiBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-        checkUiBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_check_normal.png'))
-        checkUiBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_check_press.png'))
-        checkUiBtn.setMenuIndicator(ICON_FOLDER + '/ic_drop_normal.png',
-                                    ICON_FOLDER + '/ic_drop_press.png')
+        checkUiBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_check_normal.png'))
+        checkUiBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_check_press.png'))
+        checkUiBtn.setMenuIndicator(Global.ICON_FOLDER + '/ic_drop_normal.png',
+                                    Global.ICON_FOLDER + '/ic_drop_press.png')
         checkUiBtn.setFixedSize(120, 40)
         checkMenu = QtGui.QMenu()
         checkMenu.setStyleSheet('QMenu{background-color: #282828; color: #A0A0A0}'
                                 'QMenu::item:selected {background-color: #383838;}')
-        checkMenu.addAction('UI exist', lambda check_type=IS_EXIST: self.notify_Check_UI(check_type))
-        checkMenu.addAction('UI not exist', lambda check_type=NO_EXIST: self.notify_Check_UI(check_type))
-        checkMenu.addAction('UI is blank', lambda check_type=IS_BLANK: self.notify_Check_UI(check_type))
-        checkMenu.addAction('UI relative is exist', lambda check_type=IS_RELATIVE_EXIST: self.notify_Check_UI(check_type))
+        checkMenu.addAction('UI exist', lambda check_type=UI.IS_EXIST: self.notify_check_ui(check_type))
+        checkMenu.addAction('UI not exist', lambda check_type=UI.NO_EXIST: self.notify_check_ui(check_type))
+        checkMenu.addAction('UI is blank', lambda check_type=UI.IS_BLANK: self.notify_check_ui(check_type))
+        checkMenu.addAction('UI relative is exist',
+                            lambda check_type=UI.IS_RELATIVE_EXIST: self.notify_check_ui(check_type))
         checkMenu.addAction('Check point', self.addCheckPoint)
         checkUiBtn.setMenu(checkMenu)
 
@@ -2214,8 +1460,8 @@ class PlayListPage(VContainer):
         mediaCheckBtn = IconWithWordsButton('Media Check', font_size=12, font_weight=QtGui.QFont.Light,
                                             text_color='#D1D1D1')
         mediaCheckBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-        mediaCheckBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_mediacheck_normal.png'))
-        mediaCheckBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_mediacheck_press.png'))
+        mediaCheckBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_mediacheck_normal.png'))
+        mediaCheckBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_mediacheck_press.png'))
         mediaCheckBtn.clicked.connect(self.pressMediaCheck)
         mediaCheckBtn.setFixedHeight(40)
 
@@ -2226,8 +1472,8 @@ class PlayListPage(VContainer):
 
         delayBtn = IconWithWordsButton('Delay', font_size=12, font_weight=QtGui.QFont.Light, text_color='#D1D1D1')
         delayBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-        delayBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_delay_normal.png'))
-        delayBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_delay_press.png'))
+        delayBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_delay_normal.png'))
+        delayBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_delay_press.png'))
         delayBtn.clicked.connect(self.pressDelay)
         delayBtn.setFixedSize(120, 40)
 
@@ -2256,22 +1502,21 @@ class PlayListPage(VContainer):
         previousBtn = MenuButton('Back', font_size=12, text_color='#A0A0A0')
         previousBtn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
         previousBtn.setIgnoreMouse(True)
-        previousBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_previous normal.png'))
-        previousBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_previous not active.png'))
+        previousBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_previous normal.png'))
+        previousBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_previous not active.png'))
         previousBtn.setFixedSize(120, 40)
         previousBtn.clicked.connect(self.abort_process)
 
-        cancelBtn = MyButton('CANCEL', font_size=10, font_color='#A0A0A0')
-        cancelBtn.setFixedSize(80, 24)
-        saveBtn = MyButton('SAVE', font_size=10, font_color='#A0A0A0')
-        saveBtn.setFixedSize(80, 24)
+        self.exportBtn = MyButton('EXPORT', font_size=10, font_color='#A0A0A0')
+        self.exportBtn.setFixedSize(80, 24)
+        self.exportBtn.setVisible(True)
 
         self.saveSemiField = HContainer()
-        self.saveSemiField.setSpacing(10)
-        self.saveSemiField.addWidget(cancelBtn)
-        self.saveSemiField.addWidget(saveBtn)
+        self.saveSemiField.addWidget(self.exportBtn)
+        self.saveSemiField.setAutoFitSize()
 
         jumpBar = HContainer()
+        jumpBar.setContentsMargins(0, 0, 10, 0)
         jumpBar.addWidget(previousBtn)
         jumpBar.addStretch(1)
         jumpBar.addWidget(self.saveSemiField)
@@ -2322,15 +1567,15 @@ class PlayListPage(VContainer):
         appQueueWidget.setAutoFitHeight()
 
         self.startBtn = PushButton(text='PLAY', font_size=14, text_color='#A0A0A0', rect_color='#282828')
-        self.startBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_play normal.png'))
-        self.startBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_play press.png'))
+        self.startBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_play normal.png'))
+        self.startBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_play press.png'))
         self.startBtn.clicked.connect(self.ready_script)
         self.startBtn.setFixedHeight(40)
 
         self.stopBtn = PushButton(text='STOP', font_size=14, text_color='#A0A0A0', rect_color='#282828')
-        self.stopBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/ic_stop normal.png'))
-        self.stopBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/ic_stop press.png'))
-        self.stopBtn.clicked.connect(self.stopRun)
+        self.stopBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_stop normal.png'))
+        self.stopBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/ic_stop press.png'))
+        self.stopBtn.clicked.connect(self.stop_run)
         self.stopBtn.setFixedHeight(40)
 
         self.switchBtns = QtGui.QStackedWidget()
@@ -2414,9 +1659,9 @@ class PlayListPage(VContainer):
         self.virtualScreen.setAlignment(QtCore.Qt.AlignCenter)
         self.virtualScreen.mouseClick.connect(self.getClick)
         self.virtualScreen.mouseLongClick.connect(self.getLongClick)
-        self.virtualScreen.mouseSwipe.connect(self.getSwipe)
+        self.virtualScreen.mouseSwipe.connect(self.get_swipe)
         self.virtualScreen.mouseDrag.connect(self.getDrag)
-        self.virtualScreen.checkClick.connect(self.addCheck)
+        self.virtualScreen.checkClick.connect(self.add_check)
         self.virtualScreen.checkRelativeClick.connect(self.checkRelativeClick)
         self.virtualScreen.checkRelativeDone.connect(self.checkRelativeDone)
 
@@ -2428,7 +1673,7 @@ class PlayListPage(VContainer):
         self.virtualWidget.resizeHappened.connect(self.virtualScreenResize)
 
         # disconnect page
-        self.noConnectPix = QtGui.QPixmap(ICON_FOLDER + '/ic_no_connect_blue.png')
+        self.noConnectPix = QtGui.QPixmap(Global.ICON_FOLDER + '/ic_no_connect_blue.png')
         self.noConnectPixLbl = QtGui.QLabel()
         self.noConnectPixLbl.setPixmap(self.noConnectPix)
 
@@ -2448,7 +1693,7 @@ class PlayListPage(VContainer):
 
         # process page
         processLabel = QtGui.QLabel()
-        self.processGif = QtGui.QMovie(ICON_FOLDER + '/gif_processing.gif')
+        self.processGif = QtGui.QMovie(Global.ICON_FOLDER + '/gif_processing.gif')
         processLabel.setFixedHeight(128)
 
         processLabel.setMovie(self.processGif)
@@ -2483,16 +1728,16 @@ class PlayListPage(VContainer):
         passBtn.setIconSize(QtCore.QSize(64, 24))
         passBtn.setIgnoreMouse(True)
         passBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-        passBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/btn_pass_normal.png'))
-        passBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/btn_pass_press.png'))
-        passBtn.clicked.connect(lambda: self.semi_result_clicked(autoSense.PASS))
+        passBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_pass_normal.png'))
+        passBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_pass_press.png'))
+        passBtn.clicked.connect(lambda: self.semi_result_clicked(State.PASS))
         failBtn = IconButton()
         failBtn.setIconSize(QtCore.QSize(64, 24))
         failBtn.setIgnoreMouse(True)
         failBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
-        failBtn.setNormalIcon(QtGui.QIcon(ICON_FOLDER + '/btn_fail_normal.png'))
-        failBtn.setPressIcon(QtGui.QIcon(ICON_FOLDER + '/btn_fail_press.png'))
-        failBtn.clicked.connect(lambda: self.semi_result_clicked(autoSense.FAIL))
+        failBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_fail_normal.png'))
+        failBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_fail_press.png'))
+        failBtn.clicked.connect(lambda: self.semi_result_clicked(State.FAIL))
         judgeField = HContainer()
         judgeField.addWidget(passBtn)
         judgeField.addWidget(failBtn)
@@ -2527,9 +1772,11 @@ class PlayListPage(VContainer):
         set_background_color(self.beforePixLabel, '#282828')
         self.afterPixLabel = QtGui.QLabel()
         self.afterPixLabel.setAlignment(QtCore.Qt.AlignCenter)
+
         set_background_color(self.afterPixLabel, '#282828')
 
         self.leftScreenShotField = VContainer()
+        self.leftScreenShotField.resizeHappened.connect(self.semiScreenShotResizeEvent)
         self.leftScreenShotField.setSpacing(1)
         self.leftScreenShotField.addWidget(beforeActionLabel)
         self.leftScreenShotField.addWidget(self.beforePixLabel)
@@ -2631,19 +1878,29 @@ class PlayListPage(VContainer):
         formView.setFixedHeight(60)
 
         drawerView = VContainer()
-        self.pass_fail_pie = DonutPie(radius=100, thickness=20, color='#7ED321', second_color='#DA4456')
-        self.pass_fail_pie.setMinimumHeight(290)
-        self.semi_total_pie = DonutPie(radius=100, thickness=20, color='#F5A623', second_color='#4A4A4A')
-        self.semi_total_pie.setMinimumHeight(290)
+        drawerView.setStyleSheet('PieChart{border: 1px solid #404040}')
+        self.passFailPie = PieChart(radius=100,
+                                    fst_color='#7ED321',
+                                    sec_color='#DA4456',
+                                    text1='Passed',
+                                    text2='Failed')
+        self.passFailPie.setMinimumSize(662, 293)
+        self.passFailPie.resizeHappened.connect(self.chartPieResizeEvent)
 
-        drawerView.addWidget(self.pass_fail_pie)
-        drawerView.addWidget(self.semi_total_pie)
+        self.semiTotalPie = PieChart(radius=100,
+                                     fst_color='#F5A623',
+                                     sec_color='#4A4A4A',
+                                     text1='Semi',
+                                     text2='Total')
+        # self.semi_total_pie.setAutoFitSize()
+        self.semiTotalPie.setMinimumSize(662, 293)
+        drawerView.addWidget(self.passFailPie)
+        drawerView.addWidget(self.semiTotalPie)
 
         reportView = VContainer()
         reportView.setContentsMargins(10, 10, 10, 10)
         reportView.addWidget(formView)
         reportView.addWidget(drawerView)
-        reportView.addStretch(1)
 
         self.aboutDeviceWidget = QtGui.QStackedWidget()
         self.aboutDeviceWidget.addWidget(self.virtualWidget)
@@ -2675,12 +1932,14 @@ class PlayListPage(VContainer):
             self.switch_right_frame(self.RIGHT_VIRTUAL_PAGE)
             self.switch_action_bar(0)
             self.off_list_right_click(False)
+            self.switchBtns.setVisible(True)
 
         elif mode == PROCESS_PAGE:
             self.currentPage = PROCESS_PAGE
             self.switch_right_frame(self.RIGHT_PROCESSING_PAGE)
             self.switch_action_bar(1)
             self.off_list_right_click(True)
+            self.switchBtns.setVisible(True)
 
         elif mode == SEMI_CHECK_PAGE:
             self.currentPage = SEMI_CHECK_PAGE
@@ -2689,13 +1948,16 @@ class PlayListPage(VContainer):
             self.switch_action_bar(1)
             self.off_list_right_click(True)
             self.select_check_point_action()
+            self.switchBtns.setVisible(False)
 
         elif mode == REPORT_PAGE:
             self.currentPage = REPORT_PAGE
             self.switch_left_frame(1)
             self.switch_action_bar(1)
+
             self.off_list_right_click(True)
             self.switch_right_frame(self.RIGHT_REPORT_PAGE)
+            self.switchBtns.setVisible(False)
 
     def switch_left_frame(self, number):
         """
@@ -2730,10 +1992,10 @@ class PlayListPage(VContainer):
 
     def switch_action_bar(self, number):
         self.actionBar.setCurrentIndex(number)
-        if number == 1:
-            self.saveSemiField.setVisible(False)
-        else:
+        if self.currentPage == REPORT_PAGE:
             self.saveSemiField.setVisible(True)
+        else:
+            self.saveSemiField.setVisible(False)
 
     def switch_buttons(self, number):
         self.switchBtns.setCurrentIndex(number)
@@ -2765,7 +2027,7 @@ class PlayListPage(VContainer):
 
     def testPlanItemDeleted(self, row, item, widget):
         del self.planDict[widget.planName()]
-        path = SCRIPT_FOLDER + '/' + widget.text() + '.csv'
+        path = Global.SCRIPT_FOLDER + '/' + widget.text() + '.csv'
         if os.path.exists(path):
             os.remove(path)
 
@@ -2791,7 +2053,7 @@ class PlayListPage(VContainer):
                 self.insert_plan_item(name, time.strftime("%Y/%m/%d %T", time.localtime()))
 
     def insert_plan_item(self, text, create_time=None):
-        fullName = SCRIPT_FOLDER + '/' + text + '.csv'
+        fullName = Global.SCRIPT_FOLDER + '/' + text + '.csv'
         if not os.path.exists(fullName):
             self.saveScript(text, create_time)
 
@@ -2809,7 +2071,7 @@ class PlayListPage(VContainer):
         self.testPlanListView.addCustomItem(self.testPlanListView.count(), TestPlanListItem(planItem))
 
     def findTestPlan(self):
-        for f in glob.glob(SCRIPT_FOLDER + "/*.csv"):
+        for f in glob.glob(Global.SCRIPT_FOLDER + "/*.csv"):
             baseName = os.path.basename(f)
             self.insert_plan_item(baseName[0:baseName.find('.csv')])
 
@@ -2868,26 +2130,25 @@ class PlayListPage(VContainer):
             self.refreshPlayActionView()
 
             if self.currentPage == REPORT_PAGE:
-                item = TestResultItem(self.playQueueListView.itemWidgetByRow(self.playQueueListView.currentRow()).actions())
+                item = TestResultItem(
+                    self.playQueueListView.itemWidgetByRow(self.playQueueListView.currentRow()).actions())
                 self.setReportAnalysis(item)
 
     def setReportAnalysis(self, resultItem):
         self.totalCountLabel.setText(str(resultItem.total_count()))
         self.passCountLabel.setText(str(resultItem.pass_count()))
         self.failCountLabel.setText(str(resultItem.fail_count()))
-        self.passRatioValueLabel.setText(str(resultItem.pass_ratio())+'%')
-        self.failRatioValueLabel.setText(str(resultItem.fail_ratio())+'%')
-        self.semiRatioValueLabel.setText(str(resultItem.semi_ratio())+'%')
+        self.passRatioValueLabel.setText(str(resultItem.pass_ratio()) + '%')
+        self.failRatioValueLabel.setText(str(resultItem.fail_ratio()) + '%')
+        self.semiRatioValueLabel.setText(str(resultItem.semi_ratio()) + '%')
 
-        self.pass_fail_pie.setStartAngle(0)
-        self.pass_fail_pie.setSpanAngle(360 * resultItem.pass_ratio() / 100)
-        self.semi_total_pie.setStartAngle(0)
-        self.semi_total_pie.setSpanAngle(360 * resultItem.semi_ratio() / 100)
+        self.passFailPie.setStartAngle(0)
+        self.passFailPie.setSpanAngle(360 * resultItem.pass_ratio() / 100)
+        self.semiTotalPie.setStartAngle(0)
+        self.semiTotalPie.setSpanAngle(360 * resultItem.semi_ratio() / 100)
 
-        self.pass_fail_pie.update()
-        self.semi_total_pie.update()
-
-
+        self.passFailPie.update()
+        self.semiTotalPie.update()
 
     def actionSelected(self, item):
         if item:
@@ -2898,24 +2159,10 @@ class PlayListPage(VContainer):
             self.selectedActionItem = item
             self.descriptionEdit.setEnabled(True)
             self.descriptionEdit.setPlainText(widgetItem.annotation())
+            self.currentActionItemRow = int(widgetItem.index())
 
             if self.currentPage == 2:  # show screenshot if it is in semi-check page
-                postPixmap = QtGui.QPixmap(
-                    IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, int(widgetItem.index()) - 1))
-                if not postPixmap.isNull():
-                    postPixmap = postPixmap.scaled(postPixmap.size().width() * 328 / postPixmap.size().width(),
-                                                   postPixmap.size().height() * 328 / postPixmap.size().height(),
-                                                   aspectMode=QtCore.Qt.KeepAspectRatio)
-
-                afterPixmap = QtGui.QPixmap(
-                    IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, int(widgetItem.index())))
-                if not afterPixmap.isNull():
-                    afterPixmap = afterPixmap.scaled(afterPixmap.size().width() * 328 / afterPixmap.size().width(),
-                                                     afterPixmap.size().height() * 328 / afterPixmap.size().height(),
-                                                     aspectMode=QtCore.Qt.KeepAspectRatio)
-
-                self.beforePixLabel.setPixmap(postPixmap)
-                self.afterPixLabel.setPixmap(afterPixmap)
+                self.resizeSemiScreenShot()
 
                 if widgetItem.action() == 'CheckPoint':
                     self.checkPointDescription.setText(widgetItem.parameter()[0])
@@ -2926,12 +2173,12 @@ class PlayListPage(VContainer):
     def select_check_point_action(self):
         for ranWidget in self.resultPool:
             for action in ranWidget.actions():
-                if action.tested() == autoSense.SEMI:
+                if action.tested() == State.SEMI:
                     self.playQueueListView.setCurrentItem(self.playQueueListView.itemByItemWidget(ranWidget))
                     self.actionListView.setCurrentRow(ranWidget.actions().index(action))
                     return True
 
-    def notify_Check_UI(self, check_type):
+    def notify_check_ui(self, check_type):
         """
         It draw gird on virtual screen for user to check UI component.
         :param check_type:
@@ -2975,14 +2222,14 @@ class PlayListPage(VContainer):
         self.rsThread.setStartIndex(0)
         self.rsThread.start()
 
-    def stopRun(self):
+    def stop_run(self):
         if self.rsThread.isRunning():
             self.rsThread.stop()
         self.switch_buttons(0)
 
-    def notifySetScreenContent(self):
+    def notify_show_screen_content(self):
         """
-        Show device screen
+        Show virtual screen
         :return:
         """
         try:
@@ -3067,16 +2314,16 @@ class PlayListPage(VContainer):
             if self.currentPage == 0 or self.sideStack.currentIndex() == 0:
                 actionListItem.setSignal(QtGui.QIcon(''))
             elif self.isRunning:
-                actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_normal.png'))
+                actionListItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_normal.png'))
             else:
-                if actionListItem.tested() == autoSense.NORMAL:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_normal.png'))
-                elif actionListItem.tested() == autoSense.PASS:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_passed.png'))
-                elif actionListItem.tested() == autoSense.FAIL:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_failed.png'))
-                elif actionListItem.tested() == autoSense.SEMI:
-                    actionListItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_semichecked.png'))
+                if actionListItem.tested() == State.NORMAL:
+                    actionListItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_normal.png'))
+                elif actionListItem.tested() == State.PASS:
+                    actionListItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_passed.png'))
+                elif actionListItem.tested() == State.FAIL:
+                    actionListItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_failed.png'))
+                elif actionListItem.tested() == State.SEMI:
+                    actionListItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_semichecked.png'))
 
         if scrollToIndex:
             self.scrollListViewTo(scrollToIndex, isSelect=False)
@@ -3089,7 +2336,7 @@ class PlayListPage(VContainer):
     @QtCore.Slot()
     def virtualScreenResize(self, event):
         # self.ratio = self.calculateScale(self._device.getCurrDisplay(), event.size())
-        self.notifySetScreenContent()
+        self.notify_show_screen_content()
 
     @QtCore.Slot()
     def getClick(self, point):
@@ -3133,7 +2380,7 @@ class PlayListPage(VContainer):
         workExecutor(self._device.drag, (self.dragFrom, self.dragTo, speed))
 
     @QtCore.Slot()
-    def getSwipe(self, start, end, speed):
+    def get_swipe(self, start, end, speed):
         print 'getSwipe'
         startPoint = start.toTuple()
         endPoint = end.toTuple()
@@ -3148,7 +2395,7 @@ class PlayListPage(VContainer):
         workExecutor(self._device.swipe, (self.dragFrom, self.dragTo, speed))
 
     @QtCore.Slot()
-    def addCheck(self, point, check_type):
+    def add_check(self, point, check_type):
         print 'addCheck'
         x = int(point.x() / self.ratio)
         y = int(point.y() / self.ratio)
@@ -3230,15 +2477,15 @@ class PlayListPage(VContainer):
         currentItem = self.actionListView.item(index)
         currentWidgetItem = self.actionListView.itemWidget(currentItem)
 
-        if result == autoSense.PASS:
-            currentWidgetItem.setTested(autoSense.PASS)
-            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_passed.png'))
-        elif result == autoSense.FAIL:
-            currentWidgetItem.setTested(autoSense.FAIL)
-            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_failed.png'))
-        elif result == autoSense.SEMI:
-            currentWidgetItem.setTested(autoSense.SEMI)
-            currentWidgetItem.setSignal(QtGui.QIcon(ICON_FOLDER + '/ic_semichecked.png'))
+        if result == State.PASS:
+            currentWidgetItem.setTested(State.PASS)
+            currentWidgetItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_passed.png'))
+        elif result == State.FAIL:
+            currentWidgetItem.setTested(State.FAIL)
+            currentWidgetItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_failed.png'))
+        elif result == State.SEMI:
+            currentWidgetItem.setTested(State.SEMI)
+            currentWidgetItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_semichecked.png'))
 
         self.progressBar.setValue(self.progressBar.value() + 1)
         calculate = self.progressBar.value() / self.progressBar.maximum()
@@ -3312,28 +2559,44 @@ class PlayListPage(VContainer):
         self.add_list_item('HideKeyboard')
 
     def saveScript(self, fileName, timeStamp=None):
-        fullName = SCRIPT_FOLDER + '/' + fileName + '.csv'
+        fullName = Global.SCRIPT_FOLDER + '/' + fileName + '.csv'
         if os.path.exists(fullName):
             currentPlan = self.planDict.get(fileName)
             with open(fullName, 'wb') as csvfile:
-                fieldnames = [INDEX, ACTION, PARAMETER, INFORMATION, DESCRIPTION]
+                fieldnames = [Sense.INDEX,
+                              Sense.ACTION,
+                              Sense.PARAMETER,
+                              Sense.INFORMATION,
+                              Sense.DESCRIPTION]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 for item in currentPlan.actions():
                     writer.writerow(item.inDict())
                 real = self._device.getRealDisplay()
                 resolution = [real['width'], real['height']]
-                writer.writerow({INDEX: '-1', ACTION: 'resolution', PARAMETER: str(resolution)})
-                writer.writerow({INDEX: '-2', ACTION: 'create', PARAMETER: currentPlan.createTime()})
+                writer.writerow({Sense.INDEX: '-1',
+                                 Sense.ACTION: 'resolution',
+                                 Sense.PARAMETER: str(resolution)})
+                writer.writerow({Sense.INDEX: '-2',
+                                 Sense.ACTION: 'create',
+                                 Sense.PARAMETER: currentPlan.createTime()})
         else:
             with open(fullName, 'wb') as csvfile:
-                fieldnames = [INDEX, ACTION, PARAMETER, INFORMATION, DESCRIPTION]
+                fieldnames = [Sense.INDEX,
+                              Sense.ACTION,
+                              Sense.PARAMETER,
+                              Sense.INFORMATION,
+                              Sense.DESCRIPTION]
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 real = self._device.getRealDisplay()
                 resolution = [real['width'], real['height']]
-                writer.writerow({INDEX: '-1', ACTION: 'resolution', PARAMETER: str(resolution)})
-                writer.writerow({INDEX: '-2', ACTION: 'create', PARAMETER: timeStamp})
+                writer.writerow({Sense.INDEX: '-1',
+                                 Sense.ACTION: 'resolution',
+                                 Sense.PARAMETER: str(resolution)})
+                writer.writerow({Sense.INDEX: '-2',
+                                 Sense.ACTION: 'create',
+                                 Sense.PARAMETER: timeStamp})
 
     def setCurrentPlanName(self, name):
         self.currentPlanName = name
@@ -3351,53 +2614,86 @@ class PlayListPage(VContainer):
         screenMode = self._device.getCurrDisplay()['mode']
         actions = list()
         timestamp = None
-        with open(SCRIPT_FOLDER + '/' + fileName + '.csv', 'rt') as csvfile:
+        with open(Global.SCRIPT_FOLDER + '/' + fileName + '.csv', 'rt') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                if int(row[INDEX]) > 0:
-                    if row[ACTION] == 'click':
-                        param = row[PARAMETER].strip('[\[\]]').split(',')
+                if int(row[Sense.INDEX]) > 0:
+                    if row[Sense.ACTION] == 'click':
+                        param = row[Sense.PARAMETER].strip('[\[\]]').split(',')
                         if len(param) < 3:
                             param.append(screenMode[0].upper())
-                            row[PARAMETER] = param
-                    elif row[ACTION] == 'drag':
-                        param = row[PARAMETER].strip('[\[\]]').split(',')
+                            row[Sense.PARAMETER] = param
+                    elif row[Sense.ACTION] == 'drag':
+                        param = row[Sense.PARAMETER].strip('[\[\]]').split(',')
                         if len(param) < 6:
                             param.append(screenMode[0].upper())
-                            row[PARAMETER] = param
+                            row[Sense.PARAMETER] = param
                     item = AutoSenseItem(row)
                     actions.append(item)
-                elif row[ACTION] == 'create':
-                    timestamp = row[PARAMETER]
+                elif row[Sense.ACTION] == 'create':
+                    timestamp = row[Sense.PARAMETER]
 
         return actions, timestamp
 
+    def chartPieResizeEvent(self, event):
+        print str(event.size()) + '  ' + str(event.oldSize())
+        self.passFailPie.setPieSize(event.size().height() / 3)
+        self.semiTotalPie.setPieSize(event.size().height() / 3)
+
+    def semiScreenShotResizeEvent(self, event=None):
+        print str(event.size()) + '  ' + str(event.oldSize())
+        self.resizeSemiScreenShot()
+
+    def resizeSemiScreenShot(self):
+        size = self.beforePixLabel.size()
+        self.beforePixmap = QtGui.QPixmap(
+            Global.IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, self.currentActionItemRow - 1))
+        if not self.beforePixmap.isNull():  # set default pic size
+            self.beforePixmap = self.beforePixmap.scaled(
+                size.width() * 0.8,
+                size.height() * 0.8,
+                aspectMode=QtCore.Qt.KeepAspectRatio)
+            self.beforePixLabel.setPixmap(self.beforePixmap)
+
+        size = self.afterPixLabel.size()
+        self.afterPixmap = QtGui.QPixmap(
+            Global.IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, self.currentActionItemRow))
+        if not self.afterPixmap.isNull():  # set default pic size
+            self.afterPixmap = self.afterPixmap.scaled(
+                size.width() * 0.8,
+                size.height() * 0.8,
+                aspectMode=QtCore.Qt.KeepAspectRatio)
+            self.afterPixLabel.setPixmap(self.afterPixmap)
+
+
+
 
 def add_font_family(app):
-    for f in os.listdir(FONT_FOLDER):
+    for f in os.listdir(Global.FONT_FOLDER):
         if f[-4:len(f)] == '.ttf':
-            mid = QtGui.QFontDatabase.addApplicationFont(FONT_FOLDER + '/' + f)
+            mid = QtGui.QFontDatabase.addApplicationFont(Global.FONT_FOLDER + '/' + f)
 
     print QtGui.QFontDatabase.applicationFontFamilies(mid)[0]
     app.setFont(QtGui.QFont('Open Sans'))
 
 
 def main():
-    if not os.path.exists(ROOT_FOLDER):
-        os.mkdir(ROOT_FOLDER)
-    if not os.path.exists(LOG_FOLDER):
-        os.mkdir(LOG_FOLDER)
-    if not os.path.exists(SCRIPT_FOLDER):
-        os.mkdir(SCRIPT_FOLDER)
-    if not os.path.exists(PRIVATE_FOLDER):
-        os.mkdir(PRIVATE_FOLDER)
-    if not os.path.exists(IMAGE_FOLDER):
-        os.mkdir(IMAGE_FOLDER)
+    if not os.path.exists(Global.ROOT_FOLDER):
+        os.mkdir(Global.ROOT_FOLDER)
+    if not os.path.exists(Global.LOG_FOLDER):
+        os.mkdir(Global.LOG_FOLDER)
+    if not os.path.exists(Global.SCRIPT_FOLDER):
+        os.mkdir(Global.SCRIPT_FOLDER)
+    if not os.path.exists(Global.PRIVATE_FOLDER):
+        os.mkdir(Global.PRIVATE_FOLDER)
+    if not os.path.exists(Global.IMAGE_FOLDER):
+        os.mkdir(Global.IMAGE_FOLDER)
 
     app = QtGui.QApplication(sys.argv)
     add_font_family(app)
     # wid = MainPage('emulator-5554')
     wid = MainPage('DT08A00003871140504')
+    # wid = MainPage('HT525JT00036')
     # wid = LandingPage()
     wid.raise_()
     sys.exit(app.exec_())

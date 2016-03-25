@@ -1,25 +1,15 @@
-from PySide import QtGui, QtCore
-from main import constants
-import xml.etree.ElementTree as ET
-import directory as folder
-import time
-import sys
 import re
+import sys
+import time
+import xml.etree.ElementTree as ET
+
+from PySide import QtGui, QtCore
+
+from constants import Global
+import directory as folder
 
 
-class Container(QtGui.QWidget):
-    def __init__(self, witch):
-        super(Container, self).__init__()
-        if witch == 'H':
-            self.mLayout = QtGui.QHBoxLayout()
-        else:
-            self.mLayout = QtGui.QVBoxLayout()
-        self.mLayout.setContentsMargins(0, 0, 0, 0)
-        self.mLayout.setSpacing(0)
-        self.setLayout(self.mLayout)
-
-
-class Container(QtGui.QWidget):
+class Container(QtGui.QFrame):
     needBottomBorder = False
     needBorder = False
     bottomColor = None
@@ -233,7 +223,7 @@ class InfoListWidget(ListWidget):
         item = QtGui.QListWidgetItem()
         font = item.font()
         font.setPixelSize(14)
-        font.setFamily(constants.FONT_FAMILY)
+        font.setFamily(Global.FONT_FAMILY)
         item.setFont(font)
         item.setText(text)
         return item
@@ -249,7 +239,7 @@ class PushButton(QtGui.QPushButton):
         self.pressed.connect(self.press)
         self.released.connect(self.release)
         font = self.font()
-        font.setFamily(constants.FONT_FAMILY)
+        font.setFamily(Global.FONT_FAMILY)
         if font_size:
             font.setPixelSize(font_size)
 
@@ -325,7 +315,7 @@ class IconWithWordsButton(IconButton):
         self.setStyleSheet('IconWithWordsButton{background-color: transparent; color: %s}'
                            'IconWithWordsButton::menu-indicator { image: none; }' % text_color)
         font = self.font()
-        font.setFamily(constants.FONT_FAMILY)
+        font.setFamily(Global.FONT_FAMILY)
         if font_size:
             font.setPixelSize(font_size)
 
@@ -345,7 +335,7 @@ class MenuButton(IconButton):
         self.setStyleSheet('MenuButton{background-color: transparent; color: %s}' % text_color)
 
         font = self.font()
-        font.setFamily(constants.FONT_FAMILY)
+        font.setFamily(Global.FONT_FAMILY)
         if font_size:
             font.setPixelSize(font_size)
 
@@ -370,7 +360,7 @@ class TitleButton(QtGui.QPushButton):
     def __init__(self, text=None, font_size=None, text_color=None, rect_color=None):
         super(TitleButton, self).__init__()
         font = self.font()
-        font.setFamily(constants.FONT_FAMILY)
+        font.setFamily(Global.FONT_FAMILY)
 
         if font_size:
             font.setPixelSize(font_size)
@@ -857,9 +847,9 @@ class PlayQueueListItem(HContainer):
         super(PlayQueueListItem, self).__init__()
         self.playItem = playItem
         self.box = MyCheckBox()
-        self.box.setUncheckedIcon(constants.ICON_FOLDER + '/ic_add to q_normal.png')
-        self.box.setCheckedIcon(constants.ICON_FOLDER + '/ic_confirm add to quene.png')
-        self.box.setHoverIcon(constants.ICON_FOLDER + '/ic_add to q_press.png')
+        self.box.setUncheckedIcon(Global.ICON_FOLDER + '/ic_add to q_normal.png')
+        self.box.setCheckedIcon(Global.ICON_FOLDER + '/ic_confirm add to quene.png')
+        self.box.setHoverIcon(Global.ICON_FOLDER + '/ic_add to q_press.png')
         self.box.onStateChanged.connect(self.onStateChange)
 
         self.checkWidget = VContainer()
@@ -999,7 +989,7 @@ class MyPlainTextEdit(QtGui.QPlainTextEdit):
         super(MyPlainTextEdit, self).__init__()
         self.setStyleSheet('MyPlainTextEdit{border: 1px solid #404040; background-color: transparent;}')
         font = self.font()
-        font.setFamily(constants.FONT_FAMILY)
+        font.setFamily(Global.FONT_FAMILY)
         if font_size:
             font.setPixelSize(font_size)
 
@@ -1049,27 +1039,21 @@ class DonutPie(QtGui.QLabel):
     _span_angle = 0
     _start_angle = 0
 
-    def __init__(self, radius=None, thickness=None, color=None, second_color=None):
+    def __init__(self, radius, color, second_color):
         super(DonutPie, self).__init__()
-        if radius:
-            self.setRadius(radius)
-
-        if thickness:
-            self._thickness = thickness
-
-        if color:
-            self._color = color
-
-        if second_color:
-            self._second_color = second_color
+        self._radius = radius
+        self._color = color
+        self._second_color = second_color
 
     def paintEvent(self, event):
         qp = QtGui.QPainter()
         qp.begin(self)
         try:
-            self.drawRect(qp, '#404040')
+            self.setFixedSize(self._radius * 2.1, self._radius * 2.1)
+            self._thickness = self._radius / 4
             self.drawPie(qp, self._second_color, self._radius, 0, 360)
-            self.drawPie(qp, self._color, self._radius, self._start_angle, self._span_angle)
+            if self._span_angle != 0:
+                self.drawPie(qp, self._color, self._radius, self._start_angle, self._span_angle)
             self.drawPie(qp, '#181818', self._radius - self._thickness, 0, 360)
         finally:
             qp.end()
@@ -1103,8 +1087,80 @@ class DonutPie(QtGui.QLabel):
 
     def drawRect(self, qp, color):
         qp.setPen(QtGui.QColor(color))
-        qp.drawRect(0, 9, self.width()-1, self.height()-10)
+        qp.drawRect(0, 9, self.width() - 1, self.height() - 10)
 
+
+class ChartLabel(QtGui.QLabel):
+    def __init__(self, text='', font_size=12, text_color='#FFFFFF', label_color='#7ED321'):
+        super(ChartLabel, self).__init__()
+        self.setText(text)
+        font = self.font()
+        font.setFamily('Open Sans')
+        font.setPixelSize(font_size)
+        self.setFont(font)
+
+        self.fm = QtGui.QFontMetrics(self.font())
+        self.text_color = text_color
+        self.label_color = label_color
+
+    def paintEvent(self, event):
+        qp = QtGui.QPainter()
+        qp.begin(self)
+        try:
+            self.drawRect(qp, self.label_color)
+            self.drawText(qp, self.text_color)
+            self.setFixedSize(self.fm.width(self.text()) + self.fm.height() * 3, self.fm.height() / 0.6)
+        finally:
+            qp.end()
+
+    def drawRect(self, qp, color):
+        qp.setBrush(QtGui.QColor(color))
+        qp.drawRect(self.fm.height() * 0.5, self.fm.height() * 0.33, self.fm.height(), self.fm.height())
+
+    def drawText(self, qp, color):
+        qp.setPen(QtGui.QColor(color))
+        qp.drawText(self.fm.height() * 2,
+                    self.fm.height(),
+                    self.text())
+
+
+class PieChart(HContainer):
+    def __init__(self, radius, fst_color, sec_color, text1, text2, font_size=12):
+        super(PieChart, self).__init__()
+        self._text1 = text1
+        self._text2 = text2
+        self.labelCollect = VContainer()
+        self.labelCollect.addStretch(1)
+        self.chatLabel1 = ChartLabel(self._text1, label_color=fst_color, font_size=font_size)
+        self.chatLabel2 = ChartLabel(self._text2, label_color=sec_color, font_size=font_size)
+        self.labelCollect.addWidget(self.chatLabel1)
+        self.labelCollect.addWidget(self.chatLabel2)
+
+        self.addStretch(1)
+        self.pie = DonutPie(radius=radius,
+                            color=fst_color,
+                            second_color=sec_color)
+
+        self.addWidget(self.pie)
+        self.addStretch(1)
+        self.addWidget(self.labelCollect)
+
+    def setStartAngle(self, angle):
+        self.pie.setStartAngle(angle)
+
+    def setSpanAngle(self, angle):
+        self.pie.setSpanAngle(angle)
+        a = int(angle * 100 / 360)
+        b = 100 - a
+        self.chatLabel1.setText(self._text1 + ' ( ' + str(a) + '% )')
+        self.chatLabel2.setText(self._text2 + ' ( ' + str(b) + '% )')
+        self.chatLabel1.update()
+        self.chatLabel2.update()
+
+    def setPieSize(self, radius):
+        self.pie.setRadius(radius)
+        # self.pie.setThickness(thickness)
+        self.pie.update()
 
 class PictureLabel(QtGui.QLabel):
     mouseClick = QtCore.Signal(QtCore.QPoint)
