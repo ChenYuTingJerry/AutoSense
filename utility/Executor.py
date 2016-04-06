@@ -11,11 +11,14 @@ import time
 import uiautomator
 import json
 import socket
+import binascii
+from minicap import MiniServer, MiniReader
 from Adb import AdbDevice
 from subprocess import CalledProcessError
-from PySide import QtCore
+from PySide import QtCore, QtGui
 from autoSense import AutoSenseItem
 from constants import Setting, Global, JudgeState as State
+
 
 def workExecutor(cmd, arg1=None):
         if arg1:
@@ -510,18 +513,23 @@ class UpdateScreen(QtCore.QThread):
         self.lastFrameTime = 0
         self.isRefresh = False
         self.nconcurrent = threading.BoundedSemaphore(5)
+        self.miniServer = MiniServer(self._device)
+        self.miniReader = MiniReader(self._device)
 
     def stop(self):
         """ Stop capturing """
         self.isStop = True
+        self.miniServer.stop()
 
     def pause(self):
         """ Pause capturing """
         self.isPause = True
+        self.miniServer.stop()
 
     def resume(self):
         """ resume capturing """
         self.isPause = False
+        self.start()
 
     def setDelay(self, delay=0):
         """ Set a delay time to start capturing """
@@ -529,18 +537,25 @@ class UpdateScreen(QtCore.QThread):
 
     def run(self):
         time.sleep(self.delay)
-        try:
-            self.isStop = False
-            while not self.isStop:
-                if not self.isPause and self.monitorFrame():
+        # try:
+        self.miniServer.start()
+        self.isStop = False
+        while not self.isStop:
+            if not self.isPause and self.miniServer.isActive():
+                if not self.miniServer.needRestart():
                     self.startLoad.emit()
-                    self.screenshot(path=self.picPath + '/' + self._device.serialno + '_screen.png')
+                    self.screenshot(path=self.picPath + '/' + self._device.serialno + '_screen.jpg')
                 else:
-                    time.sleep(0.2)
-        except:
-            print 'device not found'
-            self.lastFrameTime = 0
-            self.deviceOffline.emit()
+                    self.miniServer.reStart()
+                # self.isPause = True
+        # except:
+        #     print 'device not found'
+        #     self.lastFrameTime = 0
+        #     self.deviceOffline.emit()
+
+    # def run(self):
+    #     self.screenSync()
+    #     print 'done'
 
     def monitorFrame(self):
         """
@@ -567,7 +582,11 @@ class UpdateScreen(QtCore.QThread):
             time.sleep(delay)
             pp = time.time()
             if self._device.isConnected():
-                self._device.takeSnapshot(path)
+                if self.miniServer.isActive():
+                    byteData = self.miniReader.getDisplay()
+                    im = QtGui.QImage.fromData(QtCore.QByteArray.fromRawData(byteData))
+                    im.loadFromData(byteData)
+                    im.save(path, 'JPEG')
             else:
                 if not self.isStop:
                     self.deviceOffline.emit()
@@ -580,6 +599,27 @@ class UpdateScreen(QtCore.QThread):
             print e.message
         finally:
             self.nconcurrent.release()
+
+
+    def __byteToHex(self, bs):
+        return ''.join(['%02X ' % ord(byte) for byte in bs])
+
+    def __parsePicSize(self, data):
+        return int(binascii.hexlify(data[::-1]), 16)
+
+    def __parseBanner(self, data):
+        if len(data) == 24:
+            banner = dict()
+            banner['version'] = int(binascii.hexlify(data[0]), 16)
+            banner['length'] = int(binascii.hexlify(data[1]), 16)
+            banner['pid'] = int(binascii.hexlify(data[2:5][::-1]), 16)
+            banner['real.width'] = int(binascii.hexlify(data[6:9][::-1]), 16)
+            banner['real.height'] = int(binascii.hexlify(data[10:13][::-1]), 16)
+            banner['virtual.width'] = int(binascii.hexlify(data[14:17][::-1]), 16)
+            banner['virtual.height'] = int(binascii.hexlify(data[18:21][::-1]), 16)
+            banner['orient'] = int(binascii.hexlify(data[22]), 16)
+            banner['policy'] = int(binascii.hexlify(data[23]), 16)
+            return banner
 
 
 class WaitForDevice(QtCore.QThread):
@@ -822,3 +862,7 @@ class InstallThread(QtCore.QThread):
     def run(self):
         self.device.install(self.f)
         self.done.emit()
+
+
+
+

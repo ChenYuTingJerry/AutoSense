@@ -18,6 +18,9 @@ FILE_NAME = 'connect.cfg'
 
 
 class Manager(object):
+    """
+    Manage connected information
+    """
 
     connectedInfo = QtCore.Signal()
 
@@ -59,8 +62,7 @@ class Manager(object):
             output = check_output(['ps', 'ax'])
             for line in output.split('\n'):
                 if searchName in line or ('SenseMain.py') in line:
-                    pids.append(line.split()[0])  
-
+                    pids.append(line.split()[0])
 
         elif os.name == 'nt':
             output = check_output(['tasklist'])

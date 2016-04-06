@@ -4,31 +4,33 @@ Created on 2015年6月18日
 
 @author: jerrychen
 '''
-from subprocess import check_output, call
-import time
+from subprocess import check_output, call, Popen, PIPE
 import re
 import os
 import sys
-import xml.etree.ElementTree as ET
 import threading
+from PySide.QtGui import QMatrix, QImage
+from PySide.QtCore import QByteArray
 from uiautomator import Device
+import xml.etree.ElementTree as ET
 
 
 class AdbCmd(object):
     '''
     classdocs
     '''
-    __gencmd = ['adb', 'shell']
+    _adbcmd = ['adb']
+    _gencmd = ['adb', 'shell']
     __pullcmd = ['adb', 'pull']
     __pushcmd = ['adb', 'push']
     __rebootcmd = ['adb', 'reboot']
     __installcmd = ['adb', 'install', '-r']
     __uninstallcmd = ['adb', 'uninstall']
     __devicecmd = ['adb', 'devices']
-    __inputcmd = __gencmd + ['input', 'keyevent']
-    __dumpsyscmd = __gencmd + ['dumpsys']
-    __getsettingscmd = __gencmd + ['settings', 'get']
-    __putsettingscmd = __gencmd + ['settings', 'put']
+    __inputcmd = _gencmd + ['input', 'keyevent']
+    __dumpsyscmd = _gencmd + ['dumpsys']
+    __getsettingscmd = _gencmd + ['settings', 'get']
+    __putsettingscmd = _gencmd + ['settings', 'put']
 
     def __init__(self, serialno=None):
         self.serialno = serialno
@@ -45,9 +47,19 @@ class AdbCmd(object):
 
     #         call(['adb','shell','echo'], stdout=PIPE)
 
-    def shell(self, cmd, output=False, serialno=None):
+    def shell(self, cmd, output=False, serialno=None, shell=False):
         tmp = []
-        tmp.extend(self.__gencmd)
+        tmp.extend(self._gencmd)
+        tmp.extend(cmd)
+        self.__addSerial__(tmp, serialno)
+        if output:
+            return self.check_output_sync(tmp, shell=shell)
+        else:
+            call(tmp)
+
+    def adb(self, cmd, output=False, serialno=None):
+        tmp = []
+        tmp.extend(self._adbcmd)
         tmp.extend(cmd)
         self.__addSerial__(tmp, serialno)
         if output:
@@ -89,13 +101,6 @@ class AdbCmd(object):
         self.__addSerial__(tmp, serialno)
         return self.check_output_sync(tmp)
 
-    def dumpsys(self, cmd, serialno=None):
-        tmp = []
-        tmp.extend(self.__dumpsyscmd)
-        tmp.extend(cmd)
-        self.__addSerial__(tmp, serialno)
-        return self.check_output_sync(tmp)
-
     def getSettings(self, cmd, serialno=None):
         tmp = []
         tmp.extend(self.__getsettingscmd)
@@ -124,15 +129,28 @@ class AdbCmd(object):
         self.__addSerial__(tmp, serialno)
         return self.check_output_sync(tmp)
 
+    def popen(self, cmd, stdin=PIPE, stdout=PIPE, serialno=None):
+        tmp = []
+        tmp.extend(self._gencmd)
+        tmp.extend(cmd)
+        self.__addSerial__(tmp, serialno)
+        return Popen(tmp, stdin=stdin, stdout=stdout)
+
+    def getProp(self, propType=None):
+        if propType:
+            return self.cmd.shell(['getprop', propType], output=True).strip('\n')
+        else:
+            return self.cmd.shell(['getprop'], output=True).strip('\n')
+
     @staticmethod
     def devices():
         return AdbCmd.check_output_sync(AdbCmd.__devicecmd)
 
     @staticmethod
-    def check_output_sync(cmd, err=None):
+    def check_output_sync(cmd, err=None, shell=False):
         # set period for each
         # time.sleep(0.001)
-        output = check_output(cmd, stderr=err)
+        output = check_output(cmd, stderr=err, shell=shell)
         return output
 
 
@@ -151,8 +169,9 @@ class AdbDevice(object):
 
     def connect(self):
         self.d = Device(self.serialno)
+        self.d.orientation
 
-    #         self.d, self.serialno = ViewClient.connectToDeviceOrExit(serialno=self.serialno)
+        #         self.d, self.serialno = ViewClient.connectToDeviceOrExit(serialno=self.serialno)
     #         self.vc = ViewClient(self.d, self.serialno, compresseddump=False, ignoreuiautomatorkilled=True, autodump=False)
 
     def startActivity(self, component):
@@ -181,8 +200,7 @@ class AdbDevice(object):
         for selector in selectors:
             print selector.className
             bounds = selector.info['bounds']
-            if point[0] <= bounds['right'] and point[0] >= bounds['left'] and point[1] <= bounds['top'] and point[1] >= \
-                    bounds['bottom']:
+            if bounds['right'] >= point[0] >= bounds['left'] and bounds['top'] >= point[1] >= bounds['bottom']:
                 return selector
 
         for selector in selectors:
@@ -404,12 +422,27 @@ class AdbDevice(object):
         self.cmd.shell(['pm', 'clear', package])
 
     def takeSnapshot(self, path):
-        return self.d.screenshot(path)
+        p1 = self.cmd.popen(['screencap', '-p'], stdout=PIPE)
+        p = Popen(['perl', '-pe', 's/\x0D\x0D\x0A/\x0A/g'], stdin=p1.stdout, stdout=PIPE)
+        out, error = p.communicate()
+        ba = QByteArray.fromRawData(out)
+        img = QImage.fromData(ba, 'PNG')
+        orient = self.getCurrDisplay()['orientation']
+        if orient == 1:
+            img = img.transformed(QMatrix().rotate(-90))
+        elif orient == 2:
+            img = img.transformed(QMatrix().rotate(-180))
+        elif orient == 3:
+            img = img.transformed(QMatrix().rotate(-270))
+        img.save(path, 'PNG')
+
+    # def takeSnapshot(self, path):
+    #     pass
 
     def getCurrDisplay(self):
         output = self.cmd.dumpsys(['display'])
         match = re.search('mCurrentOrientation=(?P<orientation>[\d])[\w\d\s\(\),-=]+'
-                          + 'mCurrentDisplayRect=Rect\(0, 0 - (?P<width>[\d]+),\s+(?P<height>[\d]+)', output)
+                           + 'mCurrentDisplayRect=Rect\(0, 0 - (?P<width>[\d]+),\s+(?P<height>[\d]+)', output)
         if match:
             width = int(match.group('width'))
             height = int(match.group('height'))
@@ -424,9 +457,9 @@ class AdbDevice(object):
 
     def getProp(self, propType=None):
         if propType:
-            return self.cmd.shell(['getprop', propType], output=True).strip('\n')
+            return self.cmd.getProp(propType)
         else:
-            return self.cmd.shell(['getprop'], output=True).strip('\n')
+            return self.cmd.getProp(propType)
 
     def uninstall(self, package):
         self.cmd.uninstall(package)
@@ -707,3 +740,6 @@ class AdbDevice(object):
 
     def getSerialNumber(self):
         return self.serialno
+
+
+

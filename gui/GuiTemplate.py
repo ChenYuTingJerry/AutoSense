@@ -1315,25 +1315,23 @@ class PictureLabel(QtGui.QLabel):
         return False;
 
     def paintEvent(self, event):
-        if self.pixmap() is not None:
-            qp = QtGui.QPainter()
-            qp.begin(self)
-            try:
-                tmp = QtGui.QImage(self.picPath)
-                if not tmp.isNull():
-                    self.image = tmp
-                self.drawBackground(self.image, qp)
-                if self.isDrawGrid:
-                    for rect in self.rects:
-                        self.drawRect(rect['point'], qp, w=rect['width'], h=rect['height'], isRealSize=True)
-                else:
-                    if self.isRelease:
-                        if self.dragFrom == self.dragTo:
-                            self.drawRect(self.dragTo, qp, isRealSize=False)
-                        else:
-                            self.drawLine(qp, self.dragFrom, self.dragTo)
-            finally:
-                qp.end()
+        qp = QtGui.QPainter()
+        qp.begin(self)
+        try:
+            self.image = QtGui.QImage(self.picPath)
+            print self.picPath
+            self.drawBackground(self.image, qp)
+            if self.isDrawGrid:
+                for rect in self.rects:
+                    self.drawRect(rect['point'], qp, w=rect['width'], h=rect['height'], isRealSize=True)
+            else:
+                if self.isRelease:
+                    if self.dragFrom == self.dragTo:
+                        self.drawRect(self.dragTo, qp, isRealSize=False)
+                    else:
+                        self.drawLine(qp, self.dragFrom, self.dragTo)
+        finally:
+            qp.end()
 
     def drawRect(self, point, qp, w=None, h=None, isRealSize=False):
         if point:
@@ -1341,7 +1339,7 @@ class PictureLabel(QtGui.QLabel):
             pen.setWidth(1.5)
             pen.setBrush(QtCore.Qt.yellow)
             qp.setPen(pen)
-            if w == None or h == None:
+            if not w or not h:
                 if isRealSize:
                     qp.drawRect(point.x() * self.ratio, point.y() * self.ratio, 5, 5)
                 else:
@@ -1353,11 +1351,15 @@ class PictureLabel(QtGui.QLabel):
                     qp.drawRect(point.x(), point.y(), w, h)
 
     def drawBackground(self, image, qp):
+        print 'drawBackground'
         if image:
+            print self.size()
             w = image.size().width() * self.ratio
             h = image.size().height() * self.ratio
             im = image.scaled(w, h)
             qp.drawImage(0, 0, im)
+        else:
+            print 'null lll '
 
     def drawLine(self, qp, start, end):
         if start and end:

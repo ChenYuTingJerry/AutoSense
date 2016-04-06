@@ -16,7 +16,6 @@ import time
 
 from PySide import QtCore, QtGui
 
-import autoSense
 import directory as folder
 from Adb import AdbDevice
 from DeviceManager import Manager
@@ -27,7 +26,7 @@ from GuiTemplate import MainTitleButton, IconButton, IconWithWordsButton, PushBu
     BottomLineWidget, HContainer, VContainer, TestPlanListItem, MyPlainTextEdit, MyProcessingBar, IntroWindow, \
     PictureLabel, ActionListView, DelayDialog, MediaCheckDialog, MyCheckBox, MyLineEdit, ListWidgetWithLine, \
     InfoListWidget, TitleButton, SearchBox, SettingIconButton, PlayQueueListView, PlayQueueListItem, ActionListItem, \
-    MyProgressBar, MenuButton, MyButton, DonutPie, PieChart
+    MyProgressBar, MenuButton, MyButton, PieChart
 from autoSense import AutoSenseItem, PlayItem, TestPlanItem, TestResultItem
 
 PLAY_LIST_PAGE = 0
@@ -1339,7 +1338,7 @@ class PlayListPage(VContainer):
     def __init__(self, device):
         super(PlayListPage, self).__init__()
         self._device = device
-        self.picPath = Global.PRIVATE_FOLDER + '/' + str(self._device.serialno) + '_screen.png'
+        self.picPath = Global.PRIVATE_FOLDER + '/' + str(self._device.serialno) + '_screen.jpg'
         self.init_action_bar()
         self.init_left_frame()
         self.init_right_frame()
@@ -2233,14 +2232,12 @@ class PlayListPage(VContainer):
         :return:
         """
         try:
-            pic = QtGui.QPixmap(self.picPath)
+            pic = QtGui.QImage(self.picPath)
             if not pic.isNull():
                 self.ratio = self.calculate_scale(self._device.getCurrDisplay(), self.virtualWidget.size())
                 pic = pic.scaled(pic.size().width() * self.ratio,
                                  pic.size().height() * self.ratio,
                                  aspectMode=QtCore.Qt.KeepAspectRatio)
-                if not self.virtualScreen.pixmap():
-                    self.virtualScreen.setPixmap(pic)
                 # self.scrollArea.setFixedSize(pic.size().width() + 2, pic.size().height() + 2)
                 long_side = max([pic.size().width(), pic.size().height()])
                 self.virtualFrame.setMaximumSize(long_side, long_side)
@@ -2344,8 +2341,9 @@ class PlayListPage(VContainer):
         x = int(point.x() / self.ratio)
         y = int(point.y() / self.ratio)
         pressPoint = (x, y)
+        print ';;'
         info = self._device.getTouchViewInfo(pressPoint)
-
+        print 'ff'
         s = json.dumps(info)
         param = list(pressPoint)
         self.add_list_item('Click', param=param, info=s)
@@ -2666,8 +2664,6 @@ class PlayListPage(VContainer):
             self.afterPixLabel.setPixmap(self.afterPixmap)
 
 
-
-
 def add_font_family(app):
     for f in os.listdir(Global.FONT_FOLDER):
         if f[-4:len(f)] == '.ttf':
@@ -2692,8 +2688,8 @@ def main():
     app = QtGui.QApplication(sys.argv)
     add_font_family(app)
     # wid = MainPage('emulator-5554')
-    wid = MainPage('DT08A00003871140504')
-    # wid = MainPage('HT525JT00036')
+    # wid = MainPage('DT08A00003871140504')
+    wid = MainPage('CB5A248W92')
     # wid = LandingPage()
     wid.raise_()
     sys.exit(app.exec_())
