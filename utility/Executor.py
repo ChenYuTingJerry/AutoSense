@@ -83,14 +83,18 @@ class RunTest(QtCore.QThread):
     """
     actionResult = State.FAIL
     isStopRun = False
+    limit = 0
+    picData = None
+    picImage = QtGui.QImage()
     finish = QtCore.Signal()
     currentAction = QtCore.Signal(AutoSenseItem)
-    actionDone = QtCore.Signal(AutoSenseItem, bool, int)
+    actionDone = QtCore.Signal(AutoSenseItem, int, int)
 
     def __init__(self, times=1, device=None):
         super(RunTest, self).__init__()
         self.setTimes(times)
         self.setDevice(device)
+        self.setMinicap()
         self.actionSwitcher = {
             'Power': self.actionPower,
             'Unlock': self.actionUnlock,
@@ -110,6 +114,10 @@ class RunTest(QtCore.QThread):
             'MediaCheck': self.actionMediaCheck,
             'HideKeyboard': self.actionHideKeyboard,
             'CheckPoint': self.actionCheckPoint}
+
+    def setMinicap(self):
+        self.miniReader = MiniReader(self._device)
+        self.miniServer = MiniServer(self._device)
 
     def setTimes(self, times):
         """
@@ -320,6 +328,7 @@ class RunTest(QtCore.QThread):
                     if self._device.isLocked():
                         self._device.unlock()
                 result = self._device.checkSamePoint(point, info)
+                print 'reason = '+result['reason']
                 if result['answer']:
                     self.actionResult = State.PASS
                     break
@@ -327,7 +336,8 @@ class RunTest(QtCore.QThread):
                     print 'wait view'
                 time.sleep(1)
                 wait -= 1
-            except uiautomator.JsonRPCError:
+            except uiautomator.JsonRPCError as m:
+                print 'JsonRPCError: ' + m.message
                 break
 
     def actionCheckBlank(self, param, refer=None):
@@ -382,7 +392,7 @@ class RunTest(QtCore.QThread):
         point = (int(x), int(y))
         if attribute == 'text':
             if self._device.retrieveSelector(point, self._device.d(text=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -390,7 +400,7 @@ class RunTest(QtCore.QThread):
                 # self.isStopRun = True
         elif attribute == 'description':
             if self._device.retrieveSelector(point, self._device.d(description=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -398,7 +408,7 @@ class RunTest(QtCore.QThread):
                 # self.isStopRun = True
         elif attribute == 'resourceId':
             if self._device.retrieveSelector(point, self._device.d(resourceId=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -406,7 +416,7 @@ class RunTest(QtCore.QThread):
                 # self.isStopRun = True
         elif attribute == 'className':
             if self._device.retrieveSelector(point, self._device.d(className=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
                 # self.report.emit(INFO, 'Pass: View exist', True)
             else:
                 pass
@@ -424,19 +434,19 @@ class RunTest(QtCore.QThread):
         point = (int(x), int(y))
         if attribute == 'text':
             if not self._device.retrieveSelector(point, self._device.d(text=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
 
         elif attribute == 'description':
             if not self._device.retrieveSelector(point, self._device.d(description=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
 
         elif attribute == 'resourceId':
             if not self._device.retrieveSelector(point, self._device.d(resourceId=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
 
         elif attribute == 'className':
             if not self._device.retrieveSelector(point, self._device.d(className=value)):
-                self.actionResult = self.PASS
+                self.actionResult = State.PASS
 
     def actionHideKeyboard(self, param, refer=None):
         """
@@ -445,7 +455,7 @@ class RunTest(QtCore.QThread):
         :param refer: None
         """
         self._device.hideKeyboard()
-        self.actionResult = self.PASS
+        self.actionResult = State.PASS
 
     def stop(self):
         """
@@ -460,11 +470,20 @@ class RunTest(QtCore.QThread):
         """
         self.startIndex = index
 
+    def takeScreenShot(self, path):
+        self.picData = self.miniReader.getDisplay()
+        self.picImage.loadFromData(self.picData)
+        self.picImage.save(path, 'JPEG')
+
     def run(self):
         self.isStopRun = False
         self.limit = 0
         try:
-            self._device.takeSnapshot(Global.IMAGE_FOLDER + '/%s_%d.png' % (self.playName, 0))
+            self.miniServer.start()
+            ''' wait for active '''
+            while not self.miniServer.isActive():
+                time.sleep(0.5)
+            self.takeScreenShot(Global.IMAGE_FOLDER + '/%s_%d.jpg' % (self.playName, 0))
             while self.limit < self.times and not self.isStopRun:
                 self.limit += 1
                 for index in range(len(self.actions)):
@@ -475,12 +494,13 @@ class RunTest(QtCore.QThread):
                             self.actionResult = State.FAIL
                             self.currentAction.emit(item)
                             self.actionSwitcher.get(item.action())(item.parameter(), item.information())
-                            self._device.takeSnapshot(Global.IMAGE_FOLDER + '/%s_%d.png' % (self.playName, self.index))
                             self.actionDone.emit(item, self.actionResult, index)
+                            self.takeScreenShot(Global.IMAGE_FOLDER + '/%s_%d.jpg' % (self.playName, self.index))
+                            time.sleep(0.5)
+
                         else:
                             self.isStopRun = True
                             break
-
         except socket.error:
             print 'socket.error: device offline'
             self.isStopRun = True
@@ -537,21 +557,24 @@ class UpdateScreen(QtCore.QThread):
 
     def run(self):
         time.sleep(self.delay)
-        # try:
-        self.miniServer.start()
-        self.isStop = False
-        while not self.isStop:
-            if not self.isPause and self.miniServer.isActive():
-                if not self.miniServer.needRestart():
-                    self.startLoad.emit()
-                    self.screenshot(path=self.picPath + '/' + self._device.serialno + '_screen.jpg')
-                else:
-                    self.miniServer.reStart()
-                # self.isPause = True
-        # except:
-        #     print 'device not found'
-        #     self.lastFrameTime = 0
-        #     self.deviceOffline.emit()
+        try:
+            self.miniServer.start()
+            self.isStop = False
+            while not self.isStop:
+                if not self.isPause and self.miniServer.isActive():
+                    if not self.miniServer.needRestart():
+
+                        self.startLoad.emit()
+                        self.screenshot(path=self.picPath + '/' + self._device.serialno + '_screen.jpg')
+                    else:
+                        self.miniServer.reStart()
+                    # self.isPause = True
+        except:
+            print 'device not found'
+            self.lastFrameTime = 0
+            self.deviceOffline.emit()
+        finally:
+            self.miniServer.stop()
 
     # def run(self):
     #     self.screenSync()
@@ -578,7 +601,7 @@ class UpdateScreen(QtCore.QThread):
         :param delay: delay to capture screen. In second.
         """
         try:
-            self.nconcurrent.acquire()
+            # self.nconcurrent.acquire()
             time.sleep(delay)
             pp = time.time()
             if self._device.isConnected():
@@ -597,9 +620,8 @@ class UpdateScreen(QtCore.QThread):
             print e.message
         except IOError as e:
             print e.message
-        finally:
-            self.nconcurrent.release()
-
+        # finally:
+        #     self.nconcurrent.release()
 
     def __byteToHex(self, bs):
         return ''.join(['%02X ' % ord(byte) for byte in bs])

@@ -1319,7 +1319,6 @@ class PictureLabel(QtGui.QLabel):
         qp.begin(self)
         try:
             self.image = QtGui.QImage(self.picPath)
-            print self.picPath
             self.drawBackground(self.image, qp)
             if self.isDrawGrid:
                 for rect in self.rects:
@@ -1351,15 +1350,13 @@ class PictureLabel(QtGui.QLabel):
                     qp.drawRect(point.x(), point.y(), w, h)
 
     def drawBackground(self, image, qp):
-        print 'drawBackground'
         if image:
-            print self.size()
             w = image.size().width() * self.ratio
             h = image.size().height() * self.ratio
             im = image.scaled(w, h)
             qp.drawImage(0, 0, im)
         else:
-            print 'null lll '
+            print 'null background'
 
     def drawLine(self, qp, start, end):
         if start and end:

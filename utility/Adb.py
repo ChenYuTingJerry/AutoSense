@@ -169,7 +169,7 @@ class AdbDevice(object):
 
     def connect(self):
         self.d = Device(self.serialno)
-        self.d.orientation
+        self.d.orientation # notify to connect
 
         #         self.d, self.serialno = ViewClient.connectToDeviceOrExit(serialno=self.serialno)
     #         self.vc = ViewClient(self.d, self.serialno, compresseddump=False, ignoreuiautomatorkilled=True, autodump=False)
@@ -223,12 +223,24 @@ class AdbDevice(object):
             if self.d.info['currentPackageName'] == info['packageName']:
                 self.cmd.shell(['input', 'tap', str(point[0]), str(point[1])])
                 return {'answer': True, 'reason': 'it is the navigation bar'}
+            else:
+                return {'answer': False, 'reason': 'unknown view'}
 
         if info['content-desc'] != '':
-            self.d(description=info['content-desc']).click()
+            uiObject = self.d(description=info['content-desc'])
+            if self.__checkIncludePoint(uiObject, point):
+                self.cmd.shell(['input', 'tap', str(point[0]), str(point[1])])
+            else:
+                uiObject.click()
+
             return {'answer': True, 'reason': 'find by description'}
+
         if info['text'] != '':
-            self.d(text=info['text']).click()
+            uiObject = self.d(text=info['text'])
+            if self.__checkIncludePoint(uiObject, point):
+                self.cmd.shell(['input', 'tap', str(point[0]), str(point[1])])
+            else:
+                uiObject.click()
             return {'answer': True, 'reason': 'find by text'}
 
         currentViewMap = self.getTouchViewInfo(point)
@@ -243,6 +255,14 @@ class AdbDevice(object):
                 return {'answer': False, 'reason': 'In the wrong page'}
         else:
             return {'answer': False, 'reason': 'the view can\'t be found.'}
+
+    @staticmethod
+    def __checkIncludePoint(uiObject, point):
+        bounds = uiObject.info['visibleBounds']
+        result, _ = AdbDevice._parseRange(point,
+                                          (int(bounds['top']), int(bounds['left'])),
+                                          (int(bounds['right']), int(bounds['bottom'])))
+        return result
 
     @staticmethod
     def removeKey(d, keys):
@@ -264,9 +284,9 @@ class AdbDevice(object):
         root = ET.fromstring(self.dump(compressed=compressed))
         for node in root.iter('node'):
             bounds = re.match('\[(?P<x1>[\d]+),(?P<y1>[\d]+)\]\[(?P<x2>[\d]+),(?P<y2>[\d]+)\]', node.get('bounds'))
-            isInclude, area = self._parseRange(point,
-                                               (int(bounds.group('x1')), int(bounds.group('y1'))),
-                                               (int(bounds.group('x2')), int(bounds.group('y2'))))
+            isInclude, area = AdbDevice._parseRange(point,
+                                          (int(bounds.group('x1')), int(bounds.group('y1'))),
+                                          (int(bounds.group('x2')), int(bounds.group('y2'))))
             if isInclude:
                 if area <= smallestArea:
                     smallestArea = area
@@ -287,6 +307,8 @@ class AdbDevice(object):
 
     @staticmethod
     def _parseRange(point, point1, point2):
+        print point1[1] <= point[1] <= point2[1]
+        print point2
         if point1[0] <= point[0] <= point2[0] and point1[1] <= point[1] <= point2[1]:
             area = (point2[0] - point1[0]) * (point2[1] - point1[1])
             return True, area
@@ -422,6 +444,11 @@ class AdbDevice(object):
         self.cmd.shell(['pm', 'clear', package])
 
     def takeSnapshot(self, path):
+        '''
+        screen capture in png format
+        :param path: saved file path
+        :return: None
+        '''
         p1 = self.cmd.popen(['screencap', '-p'], stdout=PIPE)
         p = Popen(['perl', '-pe', 's/\x0D\x0D\x0A/\x0A/g'], stdin=p1.stdout, stdout=PIPE)
         out, error = p.communicate()
@@ -435,9 +462,6 @@ class AdbDevice(object):
         elif orient == 3:
             img = img.transformed(QMatrix().rotate(-270))
         img.save(path, 'PNG')
-
-    # def takeSnapshot(self, path):
-    #     pass
 
     def getCurrDisplay(self):
         output = self.cmd.dumpsys(['display'])

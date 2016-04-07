@@ -432,7 +432,6 @@ class ChoseDevicePage(IntroWindow):
 
     @QtCore.Slot(list)
     def refreshInfoList(self, infos):
-        print infos
         self.infoList.clear()
         items = self.deviceList.selectedItems()
         if len(items) != 0:
@@ -1729,14 +1728,14 @@ class PlayListPage(VContainer):
         passBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
         passBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_pass_normal.png'))
         passBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_pass_press.png'))
-        passBtn.clicked.connect(lambda: self.semi_result_clicked(State.PASS))
+        passBtn.clicked.connect(lambda: self.semiResultClicked(State.PASS))
         failBtn = IconButton()
         failBtn.setIconSize(QtCore.QSize(64, 24))
         failBtn.setIgnoreMouse(True)
         failBtn.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
         failBtn.setNormalIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_fail_normal.png'))
         failBtn.setPressIcon(QtGui.QIcon(Global.ICON_FOLDER + '/btn_fail_press.png'))
-        failBtn.clicked.connect(lambda: self.semi_result_clicked(State.FAIL))
+        failBtn.clicked.connect(lambda: self.semiResultClicked(State.FAIL))
         judgeField = HContainer()
         judgeField.addWidget(passBtn)
         judgeField.addWidget(failBtn)
@@ -1858,13 +1857,15 @@ class PlayListPage(VContainer):
         semiRatioField.addWidget(semiRatioLabel)
         semiRatioField.addWidget(self.semiRatioValueLabel)
 
-        emptyField = VContainer()
-        emptyLabel = MyLabel('')
-        emptyLabel.setBoader('#404040')
-        emptyValueLabel = MyLabel('')
-        emptyValueLabel.setBoader('#404040')
-        emptyField.addWidget(emptyLabel)
-        emptyField.addWidget(emptyValueLabel)
+        autoRatioField = VContainer()
+        autoRatioLabel = MyLabel('Auto Ratio', font_size=12, color='#A0A0A0')
+        autoRatioLabel.setAlignment(QtCore.Qt.AlignCenter)
+        autoRatioLabel.setBoader('#404040')
+        self.autoRatioValueLabel = MyLabel('50%', font_size=12, color='#A0A0A0')
+        self.autoRatioValueLabel.setAlignment(QtCore.Qt.AlignCenter)
+        self.autoRatioValueLabel.setBoader('#404040')
+        autoRatioField.addWidget(autoRatioLabel)
+        autoRatioField.addWidget(self.autoRatioValueLabel)
 
         formView = HContainer()
         formView.addWidget(totalField)
@@ -1873,7 +1874,7 @@ class PlayListPage(VContainer):
         formView.addWidget(passRatioField)
         formView.addWidget(failRatioField)
         formView.addWidget(semiRatioField)
-        formView.addWidget(emptyField)
+        formView.addWidget(autoRatioField)
         formView.setFixedHeight(60)
 
         drawerView = VContainer()
@@ -1890,7 +1891,7 @@ class PlayListPage(VContainer):
                                      fst_color='#F5A623',
                                      sec_color='#4A4A4A',
                                      text1='Semi',
-                                     text2='Total')
+                                     text2='Auto')
         # self.semi_total_pie.setAutoFitSize()
         self.semiTotalPie.setMinimumSize(662, 293)
         drawerView.addWidget(self.passFailPie)
@@ -1946,8 +1947,9 @@ class PlayListPage(VContainer):
             self.switch_right_frame(self.RIGHT_SEMICHECK_PAGE)
             self.switch_action_bar(1)
             self.off_list_right_click(True)
-            self.select_check_point_action()
             self.switchBtns.setVisible(False)
+            if not self.selectCheckPoint():
+                self.notifyPages.emit(REPORT_PAGE)
 
         elif mode == REPORT_PAGE:
             self.currentPage = REPORT_PAGE
@@ -2009,13 +2011,12 @@ class PlayListPage(VContainer):
             self.playQueueListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
             self.actionListView.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
 
-    def semi_result_clicked(self, result):
+    def semiResultClicked(self, result):
         item = self.actionListView.itemWidgetByRow(self.actionListView.currentRow())
-        print item.action()
         if item and item.action() == "CheckPoint":
             item.setTested(result)
             self.refreshPlayActionView()
-            if not self.select_check_point_action():
+            if not self.selectCheckPoint():
                 self.notifyPages.emit(REPORT_PAGE)
 
     def abort_process(self):
@@ -2140,6 +2141,7 @@ class PlayListPage(VContainer):
         self.passRatioValueLabel.setText(str(resultItem.pass_ratio()) + '%')
         self.failRatioValueLabel.setText(str(resultItem.fail_ratio()) + '%')
         self.semiRatioValueLabel.setText(str(resultItem.semi_ratio()) + '%')
+        self.autoRatioValueLabel.setText(str(resultItem.auto_ratio()) + '%')
 
         self.passFailPie.setStartAngle(0)
         self.passFailPie.setSpanAngle(360 * resultItem.pass_ratio() / 100)
@@ -2169,7 +2171,7 @@ class PlayListPage(VContainer):
                 else:
                     self.rightScreenShotField.setVisible(True)
 
-    def select_check_point_action(self):
+    def selectCheckPoint(self):
         for ranWidget in self.resultPool:
             for action in ranWidget.actions():
                 if action.tested() == State.SEMI:
@@ -2260,15 +2262,18 @@ class PlayListPage(VContainer):
         return ratio
 
     def add_list_item(self, action, param='', info=''):
-        insertRow = self.actionListView.getInsertRow()
-        item = AutoSenseItem()
-        item.setIndex(self.actionListView.count() + 1)
-        item.setAction(action)
-        item.setParameter(param)
-        item.setInformation(info)
-        self.planDict.get(self.getCurrentPlanName()).actions().insert(insertRow, item)
-        self.refreshActionList()
-        self.refreshPlanActionView()
+        if self.planDict.get(self.getCurrentPlanName()):
+            insertRow = self.actionListView.getInsertRow()
+            item = AutoSenseItem()
+            item.setIndex(self.actionListView.count() + 1)
+            item.setAction(action)
+            item.setParameter(param)
+            item.setInformation(info)
+            self.planDict.get(self.getCurrentPlanName()).actions().insert(insertRow, item)
+            self.refreshActionList()
+            self.refreshPlanActionView()
+        else:
+            print 'None plan'
 
     def refreshActionList(self):
         actionList = self.planDict.get(self.getCurrentPlanName()).actions()
@@ -2341,9 +2346,7 @@ class PlayListPage(VContainer):
         x = int(point.x() / self.ratio)
         y = int(point.y() / self.ratio)
         pressPoint = (x, y)
-        print ';;'
         info = self._device.getTouchViewInfo(pressPoint)
-        print 'ff'
         s = json.dumps(info)
         param = list(pressPoint)
         self.add_list_item('Click', param=param, info=s)
@@ -2474,7 +2477,7 @@ class PlayListPage(VContainer):
     def onActionDone(self, item, result, index):
         currentItem = self.actionListView.item(index)
         currentWidgetItem = self.actionListView.itemWidget(currentItem)
-
+        print 'result11111 = '+str(result)
         if result == State.PASS:
             currentWidgetItem.setTested(State.PASS)
             currentWidgetItem.setSignal(QtGui.QIcon(Global.ICON_FOLDER + '/ic_passed.png'))
@@ -2634,7 +2637,6 @@ class PlayListPage(VContainer):
         return actions, timestamp
 
     def chartPieResizeEvent(self, event):
-        print str(event.size()) + '  ' + str(event.oldSize())
         self.passFailPie.setPieSize(event.size().height() / 3)
         self.semiTotalPie.setPieSize(event.size().height() / 3)
 
@@ -2645,7 +2647,7 @@ class PlayListPage(VContainer):
     def resizeSemiScreenShot(self):
         size = self.beforePixLabel.size()
         self.beforePixmap = QtGui.QPixmap(
-            Global.IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, self.currentActionItemRow - 1))
+            Global.IMAGE_FOLDER + '/%s_%d.jpg' % (self.currentPlayName, self.currentActionItemRow - 1))
         if not self.beforePixmap.isNull():  # set default pic size
             self.beforePixmap = self.beforePixmap.scaled(
                 size.width() * 0.8,
@@ -2655,7 +2657,7 @@ class PlayListPage(VContainer):
 
         size = self.afterPixLabel.size()
         self.afterPixmap = QtGui.QPixmap(
-            Global.IMAGE_FOLDER + '/%s_%d.png' % (self.currentPlayName, self.currentActionItemRow))
+            Global.IMAGE_FOLDER + '/%s_%d.jpg' % (self.currentPlayName, self.currentActionItemRow))
         if not self.afterPixmap.isNull():  # set default pic size
             self.afterPixmap = self.afterPixmap.scaled(
                 size.width() * 0.8,

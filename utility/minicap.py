@@ -1,6 +1,7 @@
 import binascii
 import socket
-from PySide.QtCore import QThread, QByteArray
+import time
+from PySide.QtCore import QThread, QByteArray, Signal
 
 
 MINICAP_CMD = ['LD_LIBRARY_PATH=/data/local/tmp', '/data/local/tmp/minicap']
@@ -39,7 +40,9 @@ class MiniServer(QThread):
                 return line.split()[1]
 
     def stop(self):
-        self._device.cmd.shell(['kill', self.pid()])
+        pid = self.pid()
+        if pid:
+            self._device.cmd.shell(['kill', pid])
 
     def reStart(self):
         self.stop()
@@ -56,35 +59,43 @@ class MiniServer(QThread):
         return self._device.getCurrDisplay()['orientation']
 
 
-class MiniReader(object):
+class MiniReader(QThread):
     PORT = 1717
     HOST = 'localhost'
+    isStop = False
+    picData = ''
+    picEvent = Signal(QByteArray)
 
     def __init__(self, device):
+        super(MiniReader, self).__init__()
         self._device = device
 
     def getDisplay(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((self.HOST, self.PORT))
-
-        data = s.recv(24)
-        print self.parseBanner(data)
-        data = s.recv(4)
-        size = self.parsePicSize(data)
-        print 'size = ' + str(size)
         picData = ''
-        while True:
-            if size >= 4096:
-                data = s.recv(4096)
-                picData += data
-                size -= len(data)
-            elif 0 < size < 4096:
-                data = s.recv(size)
-                picData += data
-                size -= len(data)
-            elif size <= 0:
-                break
-        s.close()
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect((self.HOST, self.PORT))
+
+            data = s.recv(24)
+            # print self.parseBanner(data)
+            data = s.recv(4)
+            size = self.parsePicSize(data)
+            # print 'size = ' + str(size)
+            while True:
+                if size >= 4096:
+                    data = s.recv(4096)
+                    picData += data
+                    size -= len(data)
+                elif 0 < size < 4096:
+                    data = s.recv(size)
+                    picData += data
+                    size -= len(data)
+                elif size <= 0:
+                    break
+        except ValueError:
+            print 'ValueError: getDisplay'
+        finally:
+            s.close()
         return picData
 
     def parsePicSize(self, data):

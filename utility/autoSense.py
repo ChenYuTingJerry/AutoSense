@@ -225,6 +225,7 @@ class TestResultItem(object):
     _pass_ratio = 0
     _fail_ratio = 0
     _semi_ratio = 0
+    _auto_ratio = 0
 
     def __init__(self, testResults):
         self.__calculate__(testResults)
@@ -243,6 +244,7 @@ class TestResultItem(object):
         self._pass_ratio = self._passed * 100 / self._total
         self._fail_ratio = 100 - self._pass_ratio
         self._semi_ratio = self._semi * 100 / self._total
+        self._auto_ratio = 100 - self._semi_ratio
 
     def pass_count(self):
         return self._passed
@@ -258,6 +260,9 @@ class TestResultItem(object):
 
     def fail_ratio(self):
         return self._fail_ratio
+
+    def auto_ratio(self):
+        return self._auto_ratio
 
     def total_count(self):
         return self._total
