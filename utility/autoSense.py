@@ -5,9 +5,13 @@ Created on 2015年9月1日
 @author: jerrychen
 '''
 import base64
+import binascii
+from PySide import QtCore
 from constants import Sense, JudgeState as State
 
+
 class AutoSenseItem(object):
+    codec = QtCore.QTextCodec.codecForName('UTF-8')
     def __init__(self, content=None):
         self.itemDict = {Sense.INDEX: '',
                          Sense.ACTION: '',
@@ -31,17 +35,24 @@ class AutoSenseItem(object):
         self.itemDict[Sense.INDEX] = str(value)
 
     def setAction(self, value):
-        self.itemDict[Sense.ACTION] = value
+        self.itemDict[Sense.ACTION] = self.codec.fromUnicode(value).data()
 
     def setParameter(self, value):
         # for saving parameter
         if type(value) == list:
-            self.itemDict[Sense.PARAMETER] = ','.join(map(unicode, value))
+            self.itemDict[Sense.PARAMETER] = self.listToString(value)
         # for loading parameter
         elif value != '' and value[0] == '[':
             self.itemDict[Sense.PARAMETER] = value.strip('[\[\]]')
         else:
             self.itemDict[Sense.PARAMETER] = value
+
+    def listToString(self, value):
+        toString = ','.join(self.codec.fromUnicode(p).data() if type(p) == unicode else str(p) for p in value)
+        return toString
+
+    def unicodeToString(self, value):
+        return str(self.codec.fromUnicode(value).data())
 
     def setAnnotation(self, value):
         self.itemDict[Sense.DESCRIPTION] = value
@@ -65,11 +76,12 @@ class AutoSenseItem(object):
         return self.itemDict[Sense.ACTION]
 
     def parameter(self):
-        if self.itemDict[Sense.PARAMETER].find(',') != -1:
-            return self.itemDict[Sense.PARAMETER].strip('[\[\]]').split(',')
+        param = self.itemDict[Sense.PARAMETER]
+        if param.find(',') != -1:
+            return param.strip('[\[\]]').split(',')
         else:
-            if len(self.itemDict[Sense.PARAMETER]) > 0:
-                return [self.itemDict[Sense.PARAMETER].strip('[\[\]]')]
+            if len(param) > 0:
+                return [param.strip('[\[\]]')]
             else:
                 return ''
 

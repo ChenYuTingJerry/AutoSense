@@ -541,15 +541,15 @@ class UpdateScreen(QtCore.QThread):
         self.isStop = True
         self.miniServer.stop()
 
-    def pause(self):
-        """ Pause capturing """
-        self.isPause = True
-        self.miniServer.stop()
-
-    def resume(self):
-        """ resume capturing """
-        self.isPause = False
-        self.start()
+    # def pause(self):
+    #     """ Pause capturing """
+    #     self.isPause = True
+    #     self.miniServer.stop()
+    #
+    # def resume(self):
+    #     """ resume capturing """
+    #     self.isPause = False
+    #     # self.start()
 
     def setDelay(self, delay=0):
         """ Set a delay time to start capturing """
@@ -561,13 +561,14 @@ class UpdateScreen(QtCore.QThread):
             self.miniServer.start()
             self.isStop = False
             while not self.isStop:
-                if not self.isPause and self.miniServer.isActive():
+                if self.miniServer.isActive():
                     if not self.miniServer.needRestart():
-
                         self.startLoad.emit()
                         self.screenshot(path=self.picPath + '/' + self._device.serialno + '_screen.jpg')
                     else:
                         self.miniServer.reStart()
+                else:
+                    time.sleep(0.5)
                     # self.isPause = True
         except:
             print 'device not found'
@@ -575,10 +576,6 @@ class UpdateScreen(QtCore.QThread):
             self.deviceOffline.emit()
         finally:
             self.miniServer.stop()
-
-    # def run(self):
-    #     self.screenSync()
-    #     print 'done'
 
     def monitorFrame(self):
         """

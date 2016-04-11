@@ -10,6 +10,7 @@ import directory as folder
 
 
 class Container(QtGui.QFrame):
+    codec = QtCore.QTextCodec.codecForName('UTF-8')
     needBottomBorder = False
     needBorder = False
     bottomColor = None
@@ -567,12 +568,20 @@ class MyProgressBar(QtGui.QProgressBar):
 
 
 class MyLabel(QtGui.QLabel):
+    codec = QtCore.QTextCodec.codecForName('UTF-8')
+
     def __init__(self, text=None, font_weight=None, font_size=None, color=None):
         super(MyLabel, self).__init__()
         font = self.font()
         font.setFamily('Open Sans')
         if text:
-            self.setText(text)
+            if type(text) == unicode:
+                # codec = QtCore.QTextCodec.codecForName('UTF-8')
+                # print codec.fromUnicode(text)
+                # print text
+                self.setUniText(text)
+            else:
+                self.setText(text)
 
         if font_weight:
             font.setWeight(font_weight)
@@ -590,6 +599,9 @@ class MyLabel(QtGui.QLabel):
 
     def setBoader(self, color):
         self.setStyleSheet(self.styleSheet() + 'border: 1px solid %s;' % color)
+
+    def setUniText(self, text):
+        self.setText(text)
 
 
 class MyLineEdit(QtGui.QLineEdit):
@@ -908,13 +920,14 @@ class PlayQueueListView(MenuListView):
 
 
 class ActionListItem(HContainer):
+
     def __init__(self, autoSenseItem, index):
         super(ActionListItem, self).__init__()
         self.autoSenseItem = autoSenseItem
         self.autoSenseItem.setIndex(index)
         action = self.autoSenseItem.action()
         if self.autoSenseItem.parameter():
-            action += ' [ ' + ','.join(str(p) for p in self.autoSenseItem.parameter()) + ' ]'
+            action += ' [ ' + ','.join(self.codec.toUnicode(p) for p in self.autoSenseItem.parameter()) + ' ]'
         self.iconLabel = IconButton()
         self.iconLabel.setIconSize(QtCore.QSize(30, 30))
         self.iconLabel.setFixedSize(QtCore.QSize(30, 30))
@@ -984,6 +997,7 @@ class ActionListView(MenuListView):
 class MyPlainTextEdit(QtGui.QPlainTextEdit):
     focusIn = QtCore.Signal()
     focusOut = QtCore.Signal()
+    codec = QtCore.QTextCodec.codecForName('UTF-8')
 
     def __init__(self, font_color=None, text=None, font_size=None):
         super(MyPlainTextEdit, self).__init__()
@@ -994,7 +1008,11 @@ class MyPlainTextEdit(QtGui.QPlainTextEdit):
             font.setPixelSize(font_size)
 
         if text:
-            self.setPlainText(text)
+            print text
+            if type(text) == unicode:
+                self.setUniPainText(text)
+            else:
+                self.setPlainText(text)
 
         if font_color:
             self.setColor(font_color)
@@ -1009,6 +1027,9 @@ class MyPlainTextEdit(QtGui.QPlainTextEdit):
 
     def setColor(self, color):
         self.setStyleSheet(self.styleSheet() + 'MyPlainTextEdit{color: %s;}' % color)
+
+    def setUniPainText(self, text):
+        self.setPlainText(self.codec.toUnicode(text))
 
 
 class BottomLineWidget(HContainer):
@@ -1162,6 +1183,7 @@ class PieChart(HContainer):
         # self.pie.setThickness(thickness)
         self.pie.update()
 
+
 class PictureLabel(QtGui.QLabel):
     mouseClick = QtCore.Signal(QtCore.QPoint)
     mouseLongClick = QtCore.Signal(QtCore.QPoint, int)
@@ -1172,6 +1194,8 @@ class PictureLabel(QtGui.QLabel):
     checkRelativeDone = QtCore.Signal(QtCore.QPoint, QtCore.QPoint)
     dragFrom = None
     dragTo = None
+    pressTime = None
+    ratio = None
     isRelease = True
     isStartLoad = True
     isMouseIgnored = False
@@ -1197,7 +1221,7 @@ class PictureLabel(QtGui.QLabel):
     def mousePressEvent(self, event):
         print 'mousePressEvent'
         self.isRelease = False
-        self.presstime = time.time()
+        self.pressTime = time.time()
         self.dragFrom = event.pos()
         self.dragTo = self.dragFrom
 
@@ -1206,7 +1230,7 @@ class PictureLabel(QtGui.QLabel):
         self.isRelease = True
         if not self.isMouseIgnored:
             self.dragTo = event.pos()
-            elapse_time = int((time.time() - self.presstime) * 1000)
+            elapse_time = int((time.time() - self.pressTime) * 1000)
             if self.dragFrom == self.dragTo:
                 if elapse_time < 300:
                     self.mouseClick.emit(self.dragTo)
@@ -1246,7 +1270,7 @@ class PictureLabel(QtGui.QLabel):
     def doneDrawGrid(self):
         self.isDrawGrid = False
 
-    def set_check_type(self, set_type):
+    def setCheckType(self, set_type):
         if set_type == 'RelativeExist':
             self.isDrawRelativeGrid = True
         else:
@@ -1267,10 +1291,10 @@ class PictureLabel(QtGui.QLabel):
         return item
 
     def drawGrid(self, view_hierarchy, set_type):
-        self.set_check_type(set_type)
-        self.root = ET.fromstring(view_hierarchy)
+        self.setCheckType(set_type)
+        root = ET.fromstring(view_hierarchy)
         del self.rects[:]
-        for node in self.root.iter('node'):
+        for node in root.iter('node'):
             self.rects.append(self.analysisBounds(node.get('bounds')))
         self.update()
 
