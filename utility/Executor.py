@@ -663,14 +663,14 @@ class WaitForDevice(QtCore.QThread):
         self.isStop = False
         while not self.isStop:
             if self.device.isConnected():
-                try:
+                # try:
                     print 'start to connect'
                     self.device.connect()
                     if not self.isStop:
                         self.online.emit()
                     break
-                except:
-                    print 'Keep searching'
+                # except:
+                #     print 'Keep searching'
             time.sleep(1)
 
 

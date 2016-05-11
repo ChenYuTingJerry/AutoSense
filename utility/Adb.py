@@ -283,14 +283,16 @@ class AdbDevice(object):
         result = None
         root = ET.fromstring(self.dump(compressed=compressed))
         for node in root.iter('node'):
+            print node.get('bounds')
             bounds = re.match('\[(?P<x1>[\d]+),(?P<y1>[\d]+)\]\[(?P<x2>[\d]+),(?P<y2>[\d]+)\]', node.get('bounds'))
-            isInclude, area = AdbDevice._parseRange(point,
-                                          (int(bounds.group('x1')), int(bounds.group('y1'))),
-                                          (int(bounds.group('x2')), int(bounds.group('y2'))))
-            if isInclude:
-                if area <= smallestArea:
-                    smallestArea = area
-                    result = node
+            if bounds:
+                isInclude, area = AdbDevice._parseRange(point,
+                                              (int(bounds.group('x1')), int(bounds.group('y1'))),
+                                              (int(bounds.group('x2')), int(bounds.group('y2'))))
+                if isInclude:
+                    if area <= smallestArea:
+                        smallestArea = area
+                        result = node
 
         if result is not None:
             return result.attrib
