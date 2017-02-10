@@ -138,9 +138,9 @@ class AdbCmd(object):
 
     def getProp(self, propType=None):
         if propType:
-            return self.cmd.shell(['getprop', propType], output=True).strip('\n')
+            return self.shell(['getprop', propType], output=True).strip('\n')
         else:
-            return self.cmd.shell(['getprop'], output=True).strip('\n')
+            return self.shell(['getprop'], output=True).strip('\n')
 
     @staticmethod
     def devices():
@@ -150,6 +150,7 @@ class AdbCmd(object):
     def check_output_sync(cmd, err=None, shell=False):
         # set period for each
         # time.sleep(0.001)
+        # print cmd
         output = check_output(cmd, stderr=err, shell=shell)
         return output
 
@@ -219,6 +220,7 @@ class AdbDevice(object):
             if self.isLocked():
                 self.unlock()
 
+        print 'info: '+ str(info)
         if len(info) == 2:
             if self.d.info['currentPackageName'] == info['packageName']:
                 self.cmd.shell(['input', 'tap', str(point[0]), str(point[1])])

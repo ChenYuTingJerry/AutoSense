@@ -2699,10 +2699,12 @@ def main():
 
     app = QtGui.QApplication(sys.argv)
     add_font_family(app)
+    os.system("echo $PATH")
     # wid = MainPage('emulator-5554')
     # wid = MainPage('DT08A00003871140504')
-    wid = MainPage('CB5A248W92')
-    # wid = LandingPage()
+    # wid = MainPage('CB5A248W92')
+
+    wid = LandingPage()
     wid.raise_()
     sys.exit(app.exec_())
 

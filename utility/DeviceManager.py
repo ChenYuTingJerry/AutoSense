@@ -8,7 +8,7 @@ import re
 import os
 import csv
 from PySide import QtCore
-from subprocess import  check_output
+from subprocess import check_output
 from Adb import AdbCmd
 
 SERIAL_NO = 'serial no.'

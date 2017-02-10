@@ -4,7 +4,7 @@ import time
 from PySide.QtCore import QThread, QByteArray, Signal
 
 
-MINICAP_CMD = ['LD_LIBRARY_PATH=/data/local/tmp', '/data/local/tmp/minicap']
+MINICAP_CMD = ['LD_LIBRARY_PATH=/data/local/tmp/minicap-devel', '/data/local/tmp/minicap-devel/minicap']
 
 
 class MiniServer(QThread):
@@ -28,7 +28,7 @@ class MiniServer(QThread):
         p = self._device.cmd.popen(['ps'])
         stdout, stderr = p.communicate()
         for line in stdout.split('\r\n'):
-            if line.find('/data/local/tmp/minicap')!=-1:
+            if line.find(MINICAP_CMD[1])!=-1:
                 return True
         return False
 
@@ -36,7 +36,7 @@ class MiniServer(QThread):
         p = self._device.cmd.popen(['ps'])
         stdout, stderr = p.communicate()
         for line in stdout.split('\r\n'):
-            if line.find('/data/local/tmp/minicap') != -1:
+            if line.find(MINICAP_CMD[1]) != -1:
                 return line.split()[1]
 
     def stop(self):
